@@ -5,7 +5,7 @@ python-telegram-bot==20.7
 # PyTgCalls stack - لازم الثلاثة دول مع بعض
 pyrogram==2.0.106
 TgCrypto==1.2.5
-pytgcalls==4.0.2
+pytgcalls==3.0.0.dev24
 
 # YouTube
 yt-dlp
