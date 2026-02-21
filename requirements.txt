@@ -1,4 +1,4 @@
-pyrofork
+pyrofork==2.3.69
 tgcrypto
 py-tgcalls
 yt-dlp
