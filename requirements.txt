@@ -1,6 +1,6 @@
 # 📦 متطلبات البوت
 
 pyrogram==2.0.106
-py-tgcalls==0.9.18
+pytgcalls==3.0.0.dev24
 yt-dlp
 python-dotenv

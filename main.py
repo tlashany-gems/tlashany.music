@@ -22,9 +22,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
-from pytgcalls.types import Update
-from pytgcalls.types.input_stream import AudioPiped
-from pytgcalls.types.input_stream.quality import HighQualityAudio
+from pytgcalls.types import MediaStream
 
 # ─── إعدادات البوت ────────────────────────────────────────────────────────────
 # ⚠️ دي بيانات وهمية للتوضيح فقط — حط بياناتك الحقيقية هنا
@@ -113,14 +111,13 @@ async def play(_, message: Message):
     try:
         await pytgcalls.join_group_call(
             chat_id,
-            AudioPiped(audio_url, HighQualityAudio()),
+            MediaStream(audio_url),
         )
     except Exception as e:
-        # لو البوت بالفعل في الـ VC، غيّر الأغنية الحالية
         try:
             await pytgcalls.change_stream(
                 chat_id,
-                AudioPiped(audio_url, HighQualityAudio()),
+                MediaStream(audio_url),
             )
         except Exception as inner_e:
             await status_msg.edit_text(f"❌ حصل خطأ: {inner_e}")
