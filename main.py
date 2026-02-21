@@ -18,8 +18,9 @@ from telethon.errors import (
 from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.tl.functions.channels import (
     CreateChannelRequest, EditAdminRequest,
-    EditPhotoRequest, InviteToChannelRequest, EditAboutRequest
+    EditPhotoRequest, InviteToChannelRequest
 )
+from telethon.tl.functions.messages import EditChatAboutRequest
 from telethon.tl.types import (
     ChatAdminRights, InputChatUploadedPhoto, InputPeerChannel
 )
@@ -901,7 +902,7 @@ async def start_userbot(client, target_chat):
             elif text.startswith(".وصف "):
                 about = text.split(maxsplit=1)[1]
                 try:
-                    await client(EditAboutRequest(channel=event.chat_id, about=about))
+                    await client(EditChatAboutRequest(peer=event.chat_id, about=about))
                     await event.respond("✅ تم تغيير الوصف!")
                 except ChatAdminRequiredError:
                     await event.respond("❌ لازم تكون مشرف!")
