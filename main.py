@@ -30,7 +30,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 from datetime import datetime
-from pyrogram import Client as PyroClient
+from pyrofork import Client as PyroClient
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream
 import yt_dlp
