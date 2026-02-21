@@ -13,9 +13,8 @@ import asyncio
 import yt_dlp
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pytgcalls import PyTgCalls
-from pytgcalls.types.input_stream import AudioPiped
-from pytgcalls.types.input_stream.quality import HighQualityAudio
+from pytgcalls import PyTgCalls, idle
+from pytgcalls.types import MediaStream
 
 # ─── إعدادات ──────────────────────────────────────────────────────────────────
 API_ID         = int(os.environ.get("API_ID", "0"))
@@ -90,10 +89,9 @@ async def play(_, message: Message):
         await message.reply_text("❗ استخدم الأمر كده:\n`/play اسم الأغنية`")
         return
 
-    song_name = " ".join(message.command[1:])
-    chat_id   = message.chat.id
-
-    status = await message.reply_text(f"🔍 بدور على: **{song_name}**...")
+    song_name  = " ".join(message.command[1:])
+    chat_id    = message.chat.id
+    status     = await message.reply_text(f"🔍 بدور على: **{song_name}**...")
 
     result = search_song(song_name)
     if not result:
@@ -105,19 +103,10 @@ async def play(_, message: Message):
     mins, secs = divmod(result["duration"], 60)
 
     try:
-        await call.join_group_call(
-            chat_id,
-            AudioPiped(url, HighQualityAudio()),
-        )
-    except Exception:
-        try:
-            await call.change_stream(
-                chat_id,
-                AudioPiped(url, HighQualityAudio()),
-            )
-        except Exception as e:
-            await status.edit_text(f"❌ حصل خطأ: {e}")
-            return
+        await call.play(chat_id, MediaStream(url))
+    except Exception as e:
+        await status.edit_text(f"❌ حصل خطأ: {e}")
+        return
 
     await status.edit_text(
         f"▶️ بيشغّل دلوقتي:\n"
@@ -130,7 +119,7 @@ async def play(_, message: Message):
 @bot.on_message(filters.command("stop") & filters.group)
 async def stop(_, message: Message):
     try:
-        await call.leave_group_call(message.chat.id)
+        await call.leave_call(message.chat.id)
         await message.reply_text("⏹ وقفت التشغيل وخرجت من الـ Voice Chat.")
     except Exception as e:
         await message.reply_text(f"❌ مش قادر أوقف: {e}")
@@ -142,7 +131,7 @@ async def main():
     await userbot.start()
     await bot.start()
     await call.start()
-    await asyncio.sleep(float("inf"))
+    await idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
