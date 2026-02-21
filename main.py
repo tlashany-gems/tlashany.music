@@ -13,8 +13,8 @@ from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from datetime import datetime
 from pyrogram import Client as PyroClient
-from pytgcalls import PyTgCalls, StreamType
-from pytgcalls.types.input_stream import InputAudioStream, InputStream
+from pytgcalls import PyTgCalls
+from pytgcalls.types import MediaStream
 import yt_dlp
 
 # ══════════════════════════════════════════
@@ -112,7 +112,7 @@ async def setup_pytgcalls(phone, api_id, api_hash):
 
         if player["loop"] and player["current"]:
             try:
-                await pytgcalls.change_stream(cid, InputStream(InputAudioStream(player["current"]["file"])))
+                await pytgcalls.change_stream(cid, MediaStream(player["current"]["file"]))
             except Exception as e:
                 logger.error(f"loop error: {e}")
             return
@@ -124,7 +124,7 @@ async def setup_pytgcalls(phone, api_id, api_hash):
             nxt = player["queue"][0]
             player["current"] = nxt
             try:
-                await pytgcalls.change_stream(cid, InputStream(InputAudioStream(nxt["file"])))
+                await pytgcalls.change_stream(cid, MediaStream(nxt["file"]))
                 tg = user_data_store.get("client")
                 if tg:
                     await tg.send_message(cid, f"🎵 التالية:\n🎧 {nxt['title']}\n⏱ {nxt['duration']}")
@@ -359,8 +359,7 @@ async def start_userbot(client, target_chat):
                         player["current"] = track
                         await pytgcalls.join_group_call(
                             event.chat_id,
-                            InputStream(InputAudioStream(file_path)),
-                            stream_type=StreamType().local_stream
+                            MediaStream(file_path),
                         )
                         await msg.edit(f"🎵 بيشتغل:\n🎧 {title}\n⏱ {duration}\n👤 {sender.first_name}")
                     else:
@@ -395,7 +394,7 @@ async def start_userbot(client, target_chat):
                     if player["queue"]:
                         nxt = player["queue"][0]
                         player["current"] = nxt
-                        await pytgcalls.change_stream(event.chat_id, InputStream(InputAudioStream(nxt["file"])))
+                        await pytgcalls.change_stream(event.chat_id, MediaStream(nxt["file"]))
                         await event.respond(f"⏭ التالية:\n🎧 {nxt['title']}")
                     else:
                         player["current"] = None
