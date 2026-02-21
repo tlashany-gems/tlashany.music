@@ -29,9 +29,8 @@ from telegram.ext import (
 )
 from datetime import datetime
 from pyrogram import Client as PyroClient
-from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, AudioParameters
-from pytgcalls.exceptions import NoActiveGroupCall, AlreadyJoinedError
+from pytgcalls import PyTgCalls, StreamType
+from pytgcalls.types.input_stream import InputAudioStream, InputStream
 import yt_dlp
 import googleapiclient.discovery
 
@@ -105,9 +104,7 @@ def _parse_duration(iso: str) -> str:
 
 async def search_youtube(query: str) -> tuple:
     try:
-        req = youtube.search().list(
-            part="snippet", q=query, type="video", maxResults=1
-        )
+        req = youtube.search().list(part="snippet", q=query, type="video", maxResults=1)
         res = req.execute()
         if not res.get("items"):
             raise Exception("مفيش نتايج")
@@ -171,7 +168,7 @@ def cleanup_downloads(chat_id: int):
 
 
 # ══════════════════════════════════════════
-# إعداد PyTgCalls v4
+# إعداد PyTgCalls 2.1.0
 # ══════════════════════════════════════════
 async def setup_pytgcalls(phone, api_id, api_hash):
     global pyro_client, pytgcalls
@@ -190,7 +187,10 @@ async def setup_pytgcalls(phone, api_id, api_hash):
         if player["loop"] and player["current"]:
             track = player["current"]
             try:
-                await pytgcalls.change_stream(cid, MediaStream(track["file"], audio_parameters=AudioParameters.from_quality("high")))
+                await pytgcalls.change_stream(
+                    cid,
+                    InputStream(InputAudioStream(track["file"]))
+                )
             except Exception as e:
                 logger.error(f"loop error: {e}")
             return
@@ -202,12 +202,15 @@ async def setup_pytgcalls(phone, api_id, api_hash):
             nxt = player["queue"][0]
             player["current"] = nxt
             try:
-                await pytgcalls.change_stream(cid, MediaStream(nxt["file"], audio_parameters=AudioParameters.from_quality("high")))
+                await pytgcalls.change_stream(
+                    cid,
+                    InputStream(InputAudioStream(nxt["file"]))
+                )
                 tg = user_data_store.get("client")
                 if tg:
                     await tg.send_message(
                         cid,
-                        f"🎵 **بيشتغل دلوقتي:**\n🎧 {nxt['title']}\n⏱ {nxt.get('duration','?')}\n📋 باقي: {len(player['queue'])-1} أغنية"
+                        f"🎵 **التالية:**\n🎧 {nxt['title']}\n⏱ {nxt.get('duration','?')}\n📋 باقي: {len(player['queue'])-1}"
                     )
             except Exception as e:
                 logger.error(f"auto-play error: {e}")
@@ -221,7 +224,7 @@ async def setup_pytgcalls(phone, api_id, api_hash):
 
     await pyro_client.start()
     await pytgcalls.start()
-    logger.info("✅ PyTgCalls v4 ready")
+    logger.info("✅ PyTgCalls 2.1.0 ready")
 
 
 # ══════════════════════════════════════════
@@ -231,10 +234,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data_store.clear()
     user_data_store["main_bot_chat_id"] = update.message.chat_id
     await update.message.reply_text(
-        "🎵 *أهلاً بك في تيلثون تـلـاشـاني\\!*\n\n"
+        "🎵 أهلاً بك في تيلثون تـلـاشـاني!\n\n"
         "بوت موسيقى كامل للجروبات 🎧\n\n"
-        "ابدأ بإدخال *API\\_ID* من [my\\.telegram\\.org](https://my.telegram.org):",
-        parse_mode="MarkdownV2"
+        "ابدأ بإدخال API_ID من my.telegram.org:"
     )
     return API_ID
 
@@ -262,7 +264,11 @@ async def get_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
     user_data_store["phone"] = phone
-    client = TelegramClient(f"sessions/{phone}", user_data_store["api_id"], user_data_store["api_hash"])
+    client = TelegramClient(
+        f"sessions/{phone}",
+        user_data_store["api_id"],
+        user_data_store["api_hash"]
+    )
     await client.connect()
     user_data_store["client"] = client
     user_data_store["code_digits"] = []
@@ -276,7 +282,9 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await client.send_code_request(phone)
         await update.message.reply_text(
-            f"📩 تم إرسال كود التفعيل!\nادخل الأرقام واحد واحد ({CODE_LENGTH} أرقام)\nالرقم الأول:"
+            f"📩 تم إرسال كود التفعيل!\n"
+            f"ادخل الأرقام واحد واحد ({CODE_LENGTH} أرقام)\n"
+            f"الرقم الأول:"
         )
         return CODE_DIGITS
     except Exception as e:
@@ -428,12 +436,11 @@ async def start_userbot(client, target_chat):
         # ══════════════════════════════
         if is_group:
 
-            # .play
             if text.lower().startswith(".play") or text.startswith(".شغل"):
                 args = text.split(maxsplit=1)
                 query = args[1].strip() if len(args) > 1 else ""
                 if not query:
-                    await event.respond("⚠️ استخدم: `.play <اسم الأغنية أو رابط يوتيوب>`")
+                    await event.respond("⚠️ استخدم: .play <اسم الأغنية أو رابط يوتيوب>")
                     return
                 msg = await event.respond("🔍 جاري البحث...")
                 try:
@@ -444,31 +451,27 @@ async def start_userbot(client, target_chat):
                     else:
                         url, title, duration = await search_youtube(query)
 
-                    await msg.edit(f"⬇️ جاري تحميل: **{title}**...")
+                    await msg.edit(f"⬇️ جاري تحميل: {title}...")
                     file_path = await download_audio(url, event.chat_id)
                     player = get_player(event.chat_id)
+                    sender = await event.get_sender()
 
                     track = {
                         "title": title, "duration": duration,
                         "url": url, "file": file_path,
-                        "requested_by": (await event.get_sender()).first_name
+                        "requested_by": sender.first_name
                     }
 
                     if player["current"] is None:
                         player["queue"].append(track)
                         player["current"] = track
-                        try:
-                            await pytgcalls.join_group_call(
-                                event.chat_id,
-                                MediaStream(file_path, audio_parameters=AudioParameters.from_quality("high"))
-                            )
-                        except AlreadyJoinedError:
-                            await pytgcalls.change_stream(
-                                event.chat_id,
-                                MediaStream(file_path, audio_parameters=AudioParameters.from_quality("high"))
-                            )
+                        await pytgcalls.join_group_call(
+                            event.chat_id,
+                            InputStream(InputAudioStream(file_path)),
+                            stream_type=StreamType().local_stream
+                        )
                         await msg.edit(
-                            f"🎵 **بيشتغل دلوقتي:**\n"
+                            f"🎵 بيشتغل دلوقتي:\n"
                             f"━━━━━━━━━━━━━━━\n"
                             f"🎧 {title}\n"
                             f"⏱ المدة: {duration}\n"
@@ -478,7 +481,7 @@ async def start_userbot(client, target_chat):
                     else:
                         player["queue"].append(track)
                         await msg.edit(
-                            f"✅ **تمت الإضافة للقايمة!**\n"
+                            f"✅ تمت الإضافة للقايمة!\n"
                             f"🎧 {title}\n"
                             f"⏱ {duration}\n"
                             f"📍 الترتيب: {len(player['queue'])}\n"
@@ -515,9 +518,9 @@ async def start_userbot(client, target_chat):
                         player["current"] = nxt
                         await pytgcalls.change_stream(
                             event.chat_id,
-                            MediaStream(nxt["file"], audio_parameters=AudioParameters.from_quality("high"))
+                            InputStream(InputAudioStream(nxt["file"]))
                         )
-                        await event.respond(f"⏭ **التالية:**\n🎧 {nxt['title']}\n⏱ {nxt['duration']}")
+                        await event.respond(f"⏭ التالية:\n🎧 {nxt['title']}\n⏱ {nxt['duration']}")
                     else:
                         player["current"] = None
                         await pytgcalls.leave_group_call(event.chat_id)
@@ -542,9 +545,9 @@ async def start_userbot(client, target_chat):
             if text in (".queue", ".قايمة", ".q"):
                 player = get_player(event.chat_id)
                 if not player["queue"]:
-                    await event.respond("📋 القايمة فاضية! استخدم `.play` لتشغيل أغنية")
+                    await event.respond("📋 القايمة فاضية! استخدم .play لتشغيل أغنية")
                     return
-                lines = ["🎵 **قايمة الأغاني:**\n━━━━━━━━━━━━━━━"]
+                lines = ["🎵 قايمة الأغاني:\n━━━━━━━━━━━━━━━"]
                 for i, t in enumerate(player["queue"]):
                     icon = "▶️" if i == 0 else f"{i+1}."
                     lines.append(f"{icon} {t['title']} | {t['duration']}")
@@ -563,7 +566,7 @@ async def start_userbot(client, target_chat):
                 if player["current"]:
                     t = player["current"]
                     await event.respond(
-                        f"🎧 **الأغنية الحالية:**\n━━━━━━━━━━━━━━━\n"
+                        f"🎧 الأغنية الحالية:\n━━━━━━━━━━━━━━━\n"
                         f"🎵 {t['title']}\n⏱ {t['duration']}\n"
                         f"👤 {t.get('requested_by','؟')}\n"
                         f"🔁 تكرار: {'شغّال' if player['loop'] else 'مطفي'}\n"
@@ -582,7 +585,7 @@ async def start_userbot(client, target_chat):
                     sender = await event.get_sender()
                     name = getattr(sender, "first_name", "مجهول")
                     uname = getattr(sender, "username", None)
-                    caption = f"📩 من **{name}** (@{uname or 'لا يوجد'}):\n{event.raw_text or ''}"
+                    caption = f"📩 من {name} (@{uname or 'لا يوجد'}):\n{event.raw_text or ''}"
                     if event.media:
                         await client.send_file(target_chat, event.media, caption=caption)
                     else:
@@ -596,36 +599,36 @@ async def start_userbot(client, target_chat):
         # ══════════════════════════════
         if text == ".الاوامر":
             await event.respond(
-                "📌 **أوامر تيلثون تـلـاشـاني**\n"
+                "📌 أوامر تيلثون تـلـاشـاني\n"
                 "═══════════════════\n"
-                "🎵 **الموسيقى (للجميع في الجروبات):**\n"
-                "  `.play <اسم/رابط>` — شغّل أغنية\n"
-                "  `.pause` — وقّف مؤقتاً\n"
-                "  `.resume` — كمّل\n"
-                "  `.skip` — التالية\n"
-                "  `.stop` — وقّف كل شيء\n"
-                "  `.queue` — عرض القايمة\n"
-                "  `.loop` — تشغيل/إيقاف التكرار\n"
-                "  `.now` — الأغنية الحالية\n"
+                "🎵 الموسيقى (للجميع في الجروبات):\n"
+                "  .play <اسم/رابط> — شغّل أغنية\n"
+                "  .pause — وقّف مؤقتاً\n"
+                "  .resume — كمّل\n"
+                "  .skip — التالية\n"
+                "  .stop — وقّف كل شيء\n"
+                "  .queue — عرض القايمة\n"
+                "  .loop — تشغيل/إيقاف التكرار\n"
+                "  .now — الأغنية الحالية\n"
                 "═══════════════════\n"
-                "👤 **عامة:**\n"
-                "  `.تغييرالاسم <اسم>` — غيّر اسمك\n"
-                "  `.معلومات` — بيانات حسابك\n"
-                "  `.حالة` — حالة اليوزربوت\n"
-                "  `.رسالة @يوزر <نص>` — رسالة خاصة\n"
-                "  `.كشف` (رد) — بيانات مستخدم\n"
-                "  `.حذف` (رد) — احذف رسالة\n"
-                "  `.حذفكل` — امسح 100 رسالة\n"
-                "  `.ايقاف` — أوقف اليوزربوت\n"
+                "👤 عامة:\n"
+                "  .تغييرالاسم <اسم>\n"
+                "  .معلومات\n"
+                "  .حالة\n"
+                "  .رسالة @يوزر <نص>\n"
+                "  .كشف (رد)\n"
+                "  .حذف (رد)\n"
+                "  .حذفكل\n"
+                "  .ايقاف\n"
                 "═══════════════════\n"
-                "👥 **جروبات (مشرف):**\n"
-                "  `.حظر` — احظر\n"
-                "  `.فكحظر` — فك الحظر\n"
-                "  `.كتم` — اكتم\n"
-                "  `.فككتم` — فك الكتم\n"
-                "  `.اضافة @يوزر` — ضيف حد\n"
-                "  `.وصف <نص>` — غيّر الوصف\n"
-                "  `.صورةمجموعة` (رد) — غيّر الصورة\n"
+                "👥 جروبات (مشرف):\n"
+                "  .حظر — احظر\n"
+                "  .فكحظر — فك الحظر\n"
+                "  .كتم — اكتم\n"
+                "  .فككتم — فك الكتم\n"
+                "  .اضافة @يوزر\n"
+                "  .وصف <نص>\n"
+                "  .صورةمجموعة (رد على صورة)\n"
                 "═══════════════════"
             )
 
@@ -640,11 +643,11 @@ async def start_userbot(client, target_chat):
         elif text == ".معلومات":
             me_info = await client.get_me()
             await event.respond(
-                f"📋 **بيانات الحساب:**\n"
+                f"📋 بيانات الحساب:\n"
                 f"  الاسم: {me_info.first_name}\n"
                 f"  المعرف: @{me_info.username or 'لا يوجد'}\n"
-                f"  الـID: `{me_info.id}`\n"
-                f"  الهاتف: `{me_info.phone}`"
+                f"  الـID: {me_info.id}\n"
+                f"  الهاتف: {me_info.phone}"
             )
 
         elif text == ".حالة":
@@ -656,7 +659,7 @@ async def start_userbot(client, target_chat):
                 try:
                     user = await client.get_entity(parts[1].strip("@"))
                     await client.send_message(user, parts[2])
-                    await event.respond(f"✅ تم الإرسال")
+                    await event.respond("✅ تم الإرسال")
                 except Exception as e:
                     await event.respond(f"❌ {e}")
 
@@ -666,10 +669,10 @@ async def start_userbot(client, target_chat):
                 try:
                     u = await client.get_entity(reply.sender_id)
                     await event.respond(
-                        f"📋 **بيانات:**\n"
+                        f"📋 بيانات:\n"
                         f"  الاسم: {u.first_name}\n"
                         f"  المعرف: @{getattr(u,'username',None) or 'لا يوجد'}\n"
-                        f"  الـID: `{u.id}`"
+                        f"  الـID: {u.id}"
                     )
                 except Exception as e:
                     await event.respond(f"❌ {e}")

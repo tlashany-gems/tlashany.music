@@ -1,15 +1,8 @@
-# Core Telegram
 telethon==1.36.0
 python-telegram-bot==20.7
-
-# PyTgCalls stack - لازم الثلاثة دول مع بعض
 pyrogram==2.0.106
 TgCrypto==1.2.5
-pytgcalls==3.0.0.dev24
-
-# YouTube
+pytgcalls==2.1.0
 yt-dlp
 google-api-python-client==2.118.0
-
-# Utils
 aiohttp==3.9.3
