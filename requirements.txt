@@ -1,0 +1,19 @@
+# ══════════════════════════════════════════
+# تيلثون تـلـاشـاني - Music Bot Requirements
+# ══════════════════════════════════════════
+
+# Core Telegram
+telethon==1.36.0
+python-telegram-bot==20.7
+
+# Pyrogram + PyTgCalls (الموسيقى في الدردشات الصوتية)
+pyrogram==2.0.106
+TgCrypto==1.2.5
+py-tgcalls==0.9.10
+
+# YouTube
+yt-dlp
+google-api-python-client==2.118.0
+
+# Utils
+aiohttp==3.9.3
