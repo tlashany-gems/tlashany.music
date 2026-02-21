@@ -31,7 +31,7 @@ from telegram.ext import (
 from datetime import datetime
 from pyrogram import Client as PyroClient
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped
+from pytgcalls.types import MediaStream
 import yt_dlp
 import googleapiclient.discovery
 
@@ -224,7 +224,7 @@ async def setup_pytgcalls(phone, api_id, api_hash):
             # لو loop شغّال، كرّر نفس الأغنية
             track = player["current"]
             try:
-                await pytgcalls.change_stream(cid, AudioPiped(track["file"]))
+                await pytgcalls.change_stream(cid, MediaStream(track["file"]))
                 logger.info(f"Loop: {track['title']}")
             except Exception as e:
                 logger.error(f"Loop error: {e}")
@@ -238,7 +238,7 @@ async def setup_pytgcalls(phone, api_id, api_hash):
             next_track = player["queue"][0]
             player["current"] = next_track
             try:
-                await pytgcalls.change_stream(cid, AudioPiped(next_track["file"]))
+                await pytgcalls.change_stream(cid, MediaStream(next_track["file"]))
                 logger.info(f"Auto-play next: {next_track['title']}")
                 # إرسال رسالة للجروب
                 client_tg = user_data_store.get("client")
@@ -542,7 +542,7 @@ async def start_userbot(client, target_chat):
                         player["current"] = track
                         await pytgcalls.join_group_call(
                             event.chat_id,
-                            AudioPiped(file_path)
+                            MediaStream(file_path)
                         )
                         await msg.edit(
                             f"🎵 **بيشتغل دلوقتي:**\n"
@@ -598,7 +598,7 @@ async def start_userbot(client, target_chat):
                         nxt = player["queue"][0]
                         player["current"] = nxt
                         await pytgcalls.change_stream(
-                            event.chat_id, AudioPiped(nxt["file"])
+                            event.chat_id, MediaStream(nxt["file"])
                         )
                         await event.respond(
                             f"⏭ **تم التخطي!**\n"
