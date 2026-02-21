@@ -1,8 +1,7 @@
-telethon==1.36.0
+telethon
 python-telegram-bot==20.7
 pyrogram==2.0.106
-TgCrypto==1.2.5
+TgCrypto
 pytgcalls==2.1.0
 yt-dlp
-google-api-python-client==2.118.0
-aiohttp==3.9.3
+aiohttp
