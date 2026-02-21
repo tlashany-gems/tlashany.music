@@ -1,50 +1,52 @@
 """
-🎵 Telegram Voice Chat Music Bot
-===================================
-المتطلبات (Requirements):
-    pip install pyrogram tgcalls yt-dlp python-dotenv
-
-إعداد ملف .env:
-    API_ID=your_api_id
-    API_HASH=your_api_hash
-    BOT_TOKEN=your_bot_token
-
-الأوامر:
-    /play <اسم الأغنية> — بحث وتشغيل أغنية في الـ Voice Chat
-    /stop              — إيقاف التشغيل والخروج من الـ Voice Chat
-    /ping              — للتأكد إن البوت شغال
+🎵 Telegram Voice Chat Music Bot (Userbot)
+==========================================
+Variables على Railway:
+    API_ID         = من my.telegram.org
+    API_HASH       = من my.telegram.org
+    BOT_TOKEN      = من @BotFather
+    STRING_SESSION = الـ session string بتاع حسابك
 """
 
 import os
 import asyncio
 import yt_dlp
-from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream
+from pytgcalls.types.input_stream import AudioPiped
+from pytgcalls.types.input_stream.quality import HighQualityAudio
 
-# ─── إعدادات البوت ────────────────────────────────────────────────────────────
-# ⚠️ دي بيانات وهمية للتوضيح فقط — حط بياناتك الحقيقية هنا
-API_ID    = 21173110
-API_HASH  = "71db0c8aae15effc04dcfc636e68c349"
-BOT_TOKEN = "5715894811:AAEn1rgGrt98NbqlkcGPyz0As4mLv_I65qw"
+# ─── إعدادات ──────────────────────────────────────────────────────────────────
+API_ID         = int(os.environ.get("API_ID", "0"))
+API_HASH       = os.environ.get("API_HASH", "")
+BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
+STRING_SESSION = os.environ.get("STRING_SESSION", "")
 
 # ─── تهيئة الـ Clients ────────────────────────────────────────────────────────
-app      = Client("music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-pytgcalls = PyTgCalls(app)
+userbot = Client(
+    name="userbot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    session_string=STRING_SESSION,
+)
+
+bot = Client(
+    name="bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+)
+
+call = PyTgCalls(userbot)
 
 
-# ─── دالة البحث وتحميل الأغنية ───────────────────────────────────────────────
-def search_and_get_url(song_name: str) -> dict | None:
-    """
-    بيبحث عن الأغنية على يوتيوب ويرجع معلوماتها (عنوان + رابط الصوت).
-    """
+# ─── البحث عن الأغنية ────────────────────────────────────────────────────────
+def search_song(song_name: str) -> dict | None:
     ydl_opts = {
         "format": "bestaudio/best",
         "quiet": True,
         "noplaylist": True,
-        "default_search": "ytsearch1",   # أول نتيجة بحث
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
@@ -52,39 +54,38 @@ def search_and_get_url(song_name: str) -> dict | None:
             if info and "entries" in info and info["entries"]:
                 entry = info["entries"][0]
                 return {
-                    "title": entry.get("title", "غير معروف"),
-                    "url":   entry["url"],
+                    "title":    entry.get("title", "غير معروف"),
+                    "url":      entry["url"],
                     "duration": entry.get("duration", 0),
                 }
         except Exception as e:
-            print(f"[yt-dlp] خطأ: {e}")
+            print(f"[yt-dlp error] {e}")
     return None
 
 
-# ─── أمر /start ───────────────────────────────────────────────────────────────
-@app.on_message(filters.command("start"))
+# ─── /start ───────────────────────────────────────────────────────────────────
+@bot.on_message(filters.command("start"))
 async def start(_, message: Message):
     await message.reply_text(
         "🎵 **أهلاً وسهلاً!**\n\n"
         "أنا بوت الموسيقى بتاعك 🎧\n\n"
         "**الأوامر المتاحة:**\n"
-        "▶️ `/play اسم الأغنية` — بحث وتشغيل أغنية في الـ Voice Chat\n"
+        "▶️ `/play اسم الأغنية` — بحث وتشغيل في الـ Voice Chat\n"
         "⏹ `/stop` — إيقاف التشغيل والخروج\n"
         "🏓 `/ping` — التأكد إن البوت شغال\n\n"
         "جرب دلوقتي! ابعت `/play فيروز` مثلاً 🎶"
     )
 
 
-# ─── أمر /ping ────────────────────────────────────────────────────────────────
-@app.on_message(filters.command("ping"))
+# ─── /ping ────────────────────────────────────────────────────────────────────
+@bot.on_message(filters.command("ping"))
 async def ping(_, message: Message):
     await message.reply_text("🏓 Pong! البوت شغال.")
 
 
-# ─── أمر /play ────────────────────────────────────────────────────────────────
-@app.on_message(filters.command("play") & filters.group)
+# ─── /play ────────────────────────────────────────────────────────────────────
+@bot.on_message(filters.command("play") & filters.group)
 async def play(_, message: Message):
-    # التحقق من وجود اسم أغنية
     if len(message.command) < 2:
         await message.reply_text("❗ استخدم الأمر كده:\n`/play اسم الأغنية`")
         return
@@ -92,48 +93,44 @@ async def play(_, message: Message):
     song_name = " ".join(message.command[1:])
     chat_id   = message.chat.id
 
-    status_msg = await message.reply_text(f"🔍 بدور على: **{song_name}**...")
+    status = await message.reply_text(f"🔍 بدور على: **{song_name}**...")
 
-    # البحث عن الأغنية
-    result = search_and_get_url(song_name)
+    result = search_song(song_name)
     if not result:
-        await status_msg.edit_text("❌ معقدرتش أجيب الأغنية دي. جرب اسم تاني.")
+        await status.edit_text("❌ معقدرتش أجيب الأغنية دي. جرب اسم تاني.")
         return
 
-    title    = result["title"]
-    audio_url = result["url"]
-    duration  = result["duration"]
-    mins, secs = divmod(duration, 60)
+    title      = result["title"]
+    url        = result["url"]
+    mins, secs = divmod(result["duration"], 60)
 
-    await status_msg.edit_text(f"🎵 بشغّل: **{title}** ({mins}:{secs:02d})")
-
-    # الانضمام للـ Voice Chat وتشغيل الأغنية
     try:
-        await pytgcalls.join_group_call(
+        await call.join_group_call(
             chat_id,
-            MediaStream(audio_url),
+            AudioPiped(url, HighQualityAudio()),
         )
-    except Exception as e:
+    except Exception:
         try:
-            await pytgcalls.change_stream(
+            await call.change_stream(
                 chat_id,
-                MediaStream(audio_url),
+                AudioPiped(url, HighQualityAudio()),
             )
-        except Exception as inner_e:
-            await status_msg.edit_text(f"❌ حصل خطأ: {inner_e}")
+        except Exception as e:
+            await status.edit_text(f"❌ حصل خطأ: {e}")
             return
 
-    await status_msg.edit_text(
-        f"▶️ بيشغّل دلوقتي:\n🎵 **{title}**\n⏱ المدة: {mins}:{secs:02d}"
+    await status.edit_text(
+        f"▶️ بيشغّل دلوقتي:\n"
+        f"🎵 **{title}**\n"
+        f"⏱ المدة: {mins}:{secs:02d}"
     )
 
 
-# ─── أمر /stop ────────────────────────────────────────────────────────────────
-@app.on_message(filters.command("stop") & filters.group)
+# ─── /stop ────────────────────────────────────────────────────────────────────
+@bot.on_message(filters.command("stop") & filters.group)
 async def stop(_, message: Message):
-    chat_id = message.chat.id
     try:
-        await pytgcalls.leave_group_call(chat_id)
+        await call.leave_group_call(message.chat.id)
         await message.reply_text("⏹ وقفت التشغيل وخرجت من الـ Voice Chat.")
     except Exception as e:
         await message.reply_text(f"❌ مش قادر أوقف: {e}")
@@ -142,8 +139,10 @@ async def stop(_, message: Message):
 # ─── تشغيل البوت ─────────────────────────────────────────────────────────────
 async def main():
     print("✅ البوت شغّال!")
-    await pytgcalls.start()
-    await app.run()
+    await userbot.start()
+    await bot.start()
+    await call.start()
+    await asyncio.sleep(float("inf"))
 
 if __name__ == "__main__":
     asyncio.run(main())
