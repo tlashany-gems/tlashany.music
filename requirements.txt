@@ -2,10 +2,10 @@
 telethon==1.36.0
 python-telegram-bot==20.7
 
-# Pyrogram fork متوافق مع py-tgcalls
-pyrofork==2.3.36
+# PyTgCalls stack - لازم الثلاثة دول مع بعض
+pyrogram==2.0.106
 TgCrypto==1.2.5
-py-tgcalls==2.2.11
+pytgcalls==4.0.2
 
 # YouTube
 yt-dlp
