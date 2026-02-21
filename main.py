@@ -11,8 +11,8 @@ Variables على Railway:
 import os
 import asyncio
 import yt_dlp
-from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrofork import Client, filters
+from pyrofork.types import Message
 from pytgcalls import PyTgCalls, idle
 from pytgcalls.types import MediaStream
 
