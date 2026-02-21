@@ -1,5 +1,6 @@
-telethon
-pyrofork==2.3.36
-TgCrypto
-py-tgcalls==2.2.11
+# 📦 متطلبات البوت
+
+pyrogram==2.0.106
+tgcalls==0.9.0
 yt-dlp
+python-dotenv
