@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [build.nixpacks]
-pkgs = ["ffmpeg", "python312"]
+pkgs = ["ffmpeg"]
 
 [deploy]
 startCommand = "python main.py"
