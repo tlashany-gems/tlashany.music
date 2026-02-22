@@ -319,17 +319,15 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
         chat_id = event.chat_id
         sender_id = event.sender_id
 
-        # ══════ INBOX: رسائل واردة ══════
+        # ══════ INBOX: رسائل واردة (مش منك) ══════
         if not event.out:
             try:
                 sender = await event.get_sender()
                 is_bot_sender = sender and getattr(sender, 'bot', False)
                 if not is_bot_sender and sender_id != owner_id:
                     if event.is_private:
-                        # رسالة خاصة
                         await forward_to_inbox(event, "private")
                     elif event.is_group or event.is_channel:
-                        # منشن أو رد في جروب
                         is_mention = bool(event.mentioned)
                         is_reply_to_me = False
                         if event.is_reply:
@@ -346,17 +344,16 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
             except Exception as e:
                 logging.error(f"❌ inbox handler error: {e}")
 
-
+        # ════ أوامر التحكم في البوت (منك أنت فقط) ════
+        if event.out:
             if text == ".تفعيل_البوت":
                 bot_enabled = True
                 await reply_or_edit(event, "✅ تم تفعيل البوت بنجاح!\n🟢 جميع الميزات تعمل الآن")
                 return
-            
             elif text == ".تعطيل_البوت":
                 bot_enabled = False
                 await reply_or_edit(event, "⏸️ تم تعطيل البوت مؤقتاً!\n🔴 جميع الميزات متوقفة\n💡 استخدم `.تفعيل_البوت` لإعادة التشغيل")
                 return
-            
             elif text == ".حالة_البوت":
                 status = "🟢 مفعّل" if bot_enabled else "🔴 معطّل"
                 uptime_status = "✅ تلقائي" if keep_alive else "❌ يدوي"
@@ -368,7 +365,6 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
                     f"📱 الهاتف: {user_data_store['phone']}"
                 )
                 return
-            
             elif text == ".ايقاف":
                 await reply_or_edit(event, "🛑 جاري إيقاف البوت...")
                 await asyncio.sleep(1)
@@ -376,10 +372,7 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
                 await client.disconnect()
                 return
 
-        # ════ إذا كان البوت معطل، لا تنفذ باقي الأوامر ════
-        if not bot_enabled and event.out:
-            if text not in [".تفعيل_البوت", ".حالة_البوت", ".ايقاف"]:
-                return
+
 
         # ============ الترحيب التلقائي في الخاص فقط ============
         if event.is_private and not event.out and welcome_enabled:
