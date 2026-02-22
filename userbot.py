@@ -242,8 +242,167 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
         except Exception as e:
             await event.respond(f"❌ خطأ عام: {str(e)}")
 
-    @client.on(events.NewMessage)
-    async def handle_commands(event):
+    # ============================================================
+    # ==================== نظام الـ INBOX ====================
+    # ============================================================
+    # بيتابع: الرسائل الخاصة + المنشنات + الردود على رسائل اليوزربوت
+    # وبيبعت نسخة احتياطية للمجموعة مع معلومات المرسل وزر التواصل
+
+    async def build_inbox_caption(sender, chat, message_text, source_type):
+        """يبني الكابشن اللي هيتبعت مع كل رسالة للمجموعة"""
+        sender_name = ""
+        if sender:
+            fname = getattr(sender, 'first_name', '') or ''
+            lname = getattr(sender, 'last_name', '') or ''
+            sender_name = f"{fname} {lname}".strip() or "مجهول"
+        
+        username = getattr(sender, 'username', None) if sender else None
+        sender_id = getattr(sender, 'id', None) if sender else None
+
+        chat_name = ""
+        if chat and not getattr(chat, 'is_private', True):
+            chat_name = getattr(chat, 'title', '') or ''
+
+        # أيقونة حسب نوع المصدر
+        icons = {
+            "private":  "💬 رسالة خاصة",
+            "mention":  "📢 منشن",
+            "reply":    "↩️ رد على رسالتك",
+        }
+        source_label = icons.get(source_type, "📩 رسالة")
+
+        lines = [f"┌ {source_label}"]
+        lines.append(f"├ 👤 من: **{sender_name}**")
+        if username:
+            lines.append(f"├ 🔗 يوزر: @{username}")
+        if sender_id:
+            lines.append(f"├ 🆔 ID: `{sender_id}`")
+        if chat_name:
+            lines.append(f"├ 🏠 الجروب: {chat_name}")
+        if message_text and message_text.strip():
+            preview = message_text[:200] + ("..." if len(message_text) > 200 else "")
+            lines.append(f"├ 📝 الرسالة:\n│  {preview}")
+        lines.append(f"└ 🕐 {datetime.now().strftime('%H:%M - %d/%m/%Y')}")
+
+        return "\n".join(lines)
+
+    async def build_inbox_keyboard(sender):
+        """يبني زرار التواصل مع المرسل"""
+        from telethon.tl.types import Button
+        sender_id = getattr(sender, 'id', None) if sender else None
+        username = getattr(sender, 'username', None) if sender else None
+
+        if not sender_id:
+            return None
+
+        if username:
+            url = f"https://t.me/{username}"
+        else:
+            url = f"tg://user?id={sender_id}"
+
+        sender_name = ""
+        if sender:
+            fname = getattr(sender, 'first_name', '') or ''
+            sender_name = fname or "المستخدم"
+
+        return [Button.url(f"💬 فتح محادثة مع {sender_name}", url)]
+
+    async def forward_to_inbox(event, source_type):
+        """يبعت نسخة من الرسالة للمجموعة (target_chat)"""
+        try:
+            if not target_chat:
+                return
+
+            sender = await event.get_sender()
+            chat = await event.get_chat()
+            text = event.raw_text or ""
+
+            caption = await build_inbox_caption(sender, chat, text, source_type)
+            keyboard = await build_inbox_keyboard(sender)
+
+            # لو فيه ميديا (صورة/فيديو/ملف/صوت/ملصق/gif)
+            if event.media and not event.text:
+                # بعت الميديا مع الكابشن
+                await client.send_file(
+                    target_chat,
+                    event.media,
+                    caption=caption,
+                    buttons=keyboard,
+                    parse_mode='markdown'
+                )
+            elif event.media and event.text:
+                # ميديا مع نص
+                await client.send_file(
+                    target_chat,
+                    event.media,
+                    caption=caption,
+                    buttons=keyboard,
+                    parse_mode='markdown'
+                )
+            else:
+                # رسالة نصية فقط
+                await client.send_message(
+                    target_chat,
+                    caption,
+                    buttons=keyboard,
+                    parse_mode='markdown'
+                )
+
+        except Exception as e:
+            logging.error(f"❌ خطأ في forward_to_inbox: {e}")
+
+    @client.on(events.NewMessage(incoming=True, func=lambda e: e.is_private))
+    async def inbox_private(event):
+        """أي رسالة خاصة تيجي لليوزربوت → تتنسخ للمجموعة"""
+        try:
+            sender = await event.get_sender()
+            # تجاهل البوتات والرسائل من حسابنا
+            if sender and getattr(sender, 'bot', False):
+                return
+            if event.sender_id == owner_id:
+                return
+            await forward_to_inbox(event, "private")
+        except Exception as e:
+            logging.error(f"❌ inbox_private error: {e}")
+
+    @client.on(events.NewMessage(incoming=True, func=lambda e: not e.is_private))
+    async def inbox_groups(event):
+        """في الجروبات: لو حد عمل منشن أو رد على رسالة اليوزربوت → تتنسخ"""
+        try:
+            if event.sender_id == owner_id:
+                return
+
+            sender = await event.get_sender()
+            if sender and getattr(sender, 'bot', False):
+                return
+
+            is_mention = False
+            is_reply_to_me = False
+
+            # تحقق من المنشن
+            if event.mentioned:
+                is_mention = True
+
+            # تحقق من الرد على رسالة اليوزربوت
+            if event.is_reply:
+                try:
+                    replied = await event.get_reply_message()
+                    if replied and replied.sender_id == owner_id:
+                        is_reply_to_me = True
+                except Exception:
+                    pass
+
+            if is_mention:
+                await forward_to_inbox(event, "mention")
+            elif is_reply_to_me:
+                await forward_to_inbox(event, "reply")
+
+        except Exception as e:
+            logging.error(f"❌ inbox_groups error: {e}")
+
+    # ============================================================
+
+
         nonlocal welcome_enabled, welcome_image_path, welcome_text_template, bot_enabled, keep_alive
         text = event.raw_text
         chat_id = event.chat_id

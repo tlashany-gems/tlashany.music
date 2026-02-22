@@ -78,8 +78,9 @@ DEFAULT_CONFIG = {
     "FORCE_CHANNELS": [],
     "SUBSCRIPTION_IMAGE": DEFAULT_GROUP_PHOTO_URL,
     "STARTUP_IMAGE": STARTUP_IMAGE_URL,
+    "GROUP_PHOTO": DEFAULT_GROUP_PHOTO_URL,   # ✅ صورة المجموعة اللي بتتعمل
     "BOT_ENABLED": True,
-    "MAX_SESSIONS": int(os.getenv("MAX_SESSIONS", "50"))  # الحد الأقصى للجلسات
+    "MAX_SESSIONS": int(os.getenv("MAX_SESSIONS", "50"))
 }
 
 # ==================== الإعدادات ====================
@@ -276,6 +277,9 @@ def admin_main_keyboard(bot_enabled, max_sessions, active_count):
         [
             InlineKeyboardButton("⎙ الجلسات",     callback_data="sec_sessions"),
             InlineKeyboardButton("🔒 الاشتراك",   callback_data="sec_sub"),
+        ],
+        [
+            InlineKeyboardButton("🖼 صورة المجموعة", callback_data="sec_groupphoto"),
         ],
         [
             InlineKeyboardButton(toggle_text,      callback_data="toggle_bot"),
@@ -534,7 +538,7 @@ async def create_and_setup_group(client: TelegramClient, bot_token: str):
         raise Exception(f"{DECOR_ERROR} فشل إنشاء المجموعة: {e}")
 
     try:
-        photo_url = config.get("SUBSCRIPTION_IMAGE", DEFAULT_GROUP_PHOTO_URL)
+        photo_url = config.get("GROUP_PHOTO", DEFAULT_GROUP_PHOTO_URL)
         async with aiohttp.ClientSession() as session:
             async with session.get(photo_url) as resp:
                 if resp.status == 200:
@@ -1089,6 +1093,37 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del admin_actions[user_id]
             return
 
+        elif action == "set_group_photo":
+            if update.message.photo:
+                # صورة مباشرة - نحفظ file_id
+                file_id = update.message.photo[-1].file_id
+                # نحمل الصورة ونحفظها محلياً
+                file = await update.message.photo[-1].get_file()
+                file_path = os.path.join("data", f"group_photo_{int(datetime.now().timestamp())}.jpg")
+                await file.download_to_drive(file_path)
+                config["GROUP_PHOTO"] = file_path
+                save_config(config)
+                await update.message.reply_text(
+                    f"{DECOR_CHECK} تم تحديث صورة المجموعة بنجاح! 🖼\n\n"
+                    f"📌 هتتطبق على أي مجموعة جديدة بتتعمل"
+                )
+                del admin_actions[user_id]
+                return
+            elif text and (text.startswith("http://") or text.startswith("https://")):
+                config["GROUP_PHOTO"] = text
+                save_config(config)
+                await update.message.reply_text(
+                    f"{DECOR_CHECK} تم تحديث رابط صورة المجموعة! 🖼\n\n"
+                    f"📌 هتتطبق على أي مجموعة جديدة بتتعمل"
+                )
+                del admin_actions[user_id]
+                return
+            else:
+                await update.message.reply_text(
+                    f"{DECOR_ERROR} أرسل صورة مباشرة أو رابط صورة يبدأ بـ https://"
+                )
+                return
+
         elif action == "force_setimg":
             if update.message.photo:
                 file = await update.message.photo[-1].get_file()
@@ -1262,11 +1297,52 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 ],
                 [
                     InlineKeyboardButton("📋 القائمة",     callback_data="force_list"),
-                    InlineKeyboardButton("🖼 الصورة",      callback_data="force_setimg"),
+                    InlineKeyboardButton("🖼 صورة الاشتراك", callback_data="force_setimg"),
                 ],
                 [back_btn()],
             ]
             await show_section(query, f"🔒 إدارة الاشتراك الإجباري\n\nالقنوات الحالية:\n{ch_text}", keyboard)
+            return
+
+        # ====== قسم صورة المجموعة ======
+        elif data == "sec_groupphoto":
+            current_photo = config.get("GROUP_PHOTO", DEFAULT_GROUP_PHOTO_URL)
+            is_url = current_photo.startswith("http")
+            current_text = f"🔗 رابط" if is_url else f"📁 ملف محفوظ"
+            keyboard = [
+                [InlineKeyboardButton("🖼 تغيير الصورة", callback_data="set_group_photo")],
+                [InlineKeyboardButton("👁 معاينة الصورة الحالية", callback_data="preview_group_photo")],
+                [InlineKeyboardButton("🔙 رجوع", callback_data="admin_home")],
+            ]
+            await show_section(query,
+                f"🖼 صورة المجموعة\n\n"
+                f"الصورة الحالية: {current_text}\n\n"
+                f"📌 الصورة دي هتتحط تلقائياً في كل مجموعة جديدة بتتعمل",
+                keyboard)
+            return
+
+        elif data == "set_group_photo":
+            admin_actions[user_id] = "set_group_photo"
+            keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="sec_groupphoto")]]
+            await show_section(query,
+                "🖼 أرسل الصورة الجديدة للمجموعة:\n\n"
+                "• صورة مباشرة 📸\n"
+                "• أو رابط صورة 🔗",
+                keyboard)
+            return
+
+        elif data == "preview_group_photo":
+            current_photo = config.get("GROUP_PHOTO", DEFAULT_GROUP_PHOTO_URL)
+            keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="sec_groupphoto")]]
+            try:
+                await query.message.reply_photo(
+                    photo=current_photo,
+                    caption="👆 صورة المجموعة الحالية",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                await query.answer()
+            except Exception:
+                await show_section(query, f"❌ مش قادر أعرض الصورة\n\nالرابط: {current_photo}", keyboard)
             return
 
         elif data == "set_max_sessions":
