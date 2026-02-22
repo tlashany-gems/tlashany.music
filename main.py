@@ -200,7 +200,21 @@ async def delete_previous_message(context: ContextTypes.DEFAULT_TYPE, chat_id: i
 
 async def send_clean(context, chat_id: int, text: str, reply_markup=None, parse_mode=None) -> int:
     """✅ بتحذف الرسالة القديمة وتبعت جديدة - يحافظ على الشات نضيف"""
-    await send_clean(context, chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    # حذف الرسالة القديمة
+    try:
+        if "last_message_id" in context.user_data:
+            await context.bot.delete_message(chat_id=chat_id, message_id=context.user_data["last_message_id"])
+            del context.user_data["last_message_id"]
+    except Exception:
+        pass
+    # بعت الجديدة
+    msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode
+    )
+    context.user_data["last_message_id"] = msg.message_id
     return msg.message_id
 
 async def edit_admin_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str,
