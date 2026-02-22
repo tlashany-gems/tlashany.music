@@ -846,10 +846,36 @@ async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_message_id"] = msg.message_id
         return PASSWORD_STATE
     except Exception as e:
+        error_text = str(e)
         await delete_previous_message(context, user_id)
+
+        # ✅ لو الكود انتهى، نبعت كود جديد تلقائياً
+        if "expired" in error_text.lower() or "PHONE_CODE_EXPIRED" in error_text:
+            try:
+                store = get_user_store(user_id)
+                await store['client'].send_code_request(store['phone'])
+                msg = await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"⏰ الكود انتهت صلاحيته!\n\n"
+                         f"{DECOR_CODE} تم إرسال كود جديد تلقائياً\n\n"
+                         f"📲 أدخل الكود الجديد كامل مرة واحدة:"
+                )
+                context.user_data["last_message_id"] = msg.message_id
+                return CODE_STATE
+            except Exception:
+                msg = await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{DECOR_ERROR} فشل إرسال كود جديد\n\nابعت /start وحاول تاني"
+                )
+                context.user_data["last_message_id"] = msg.message_id
+                return ConversationHandler.END
+
+        # أي خطأ تاني مع زر إعادة المحاولة
+        keyboard = [[InlineKeyboardButton("🔄 إعادة المحاولة", callback_data="start_now")]]
         msg = await context.bot.send_message(
             chat_id=user_id,
-            text=f"{DECOR_ERROR} فشل تسجيل الدخول: {str(e)}\n\nتأكد من الكود وحاول مرة أخرى"
+            text=f"{DECOR_ERROR} فشل تسجيل الدخول\n\n{error_text}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
         context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
@@ -1099,6 +1125,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await check_force_sub(user_id, context.bot):
         await send_subscription_prompt(context.bot, user_id, context)
+        return
+
+    # ✅ الإصلاح: بعت الترحيب بس لو المستخدم مش في محادثة نشطة
+    store = get_user_store(user_id)
+    if store:  # لو عنده بيانات يعني في محادثة نشطة
         return
 
     await send_welcome_message(update, context)
