@@ -259,17 +259,26 @@ def back_btn():
     """زر الرجوع للوحة الرئيسية"""
     return InlineKeyboardButton("🔙 رجوع", callback_data="admin_home")
 
-async def show_section(query, text: str, keyboard: list):
-    """✅ عرض قسم - بيبعت رسالة نصية جديدة أو يعدل لو الرسالة نصية"""
+async def show_section(query, text: str, keyboard):
+    """✅ عرض قسم - يعدل caption لو صورة، أو edit_text لو نص"""
+    if isinstance(keyboard, InlineKeyboardMarkup):
+        kb = keyboard
+    else:
+        kb = InlineKeyboardMarkup(keyboard)
+    # جرب تعدل الـ caption (لو صورة/animation)
     try:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.edit_caption(caption=text, reply_markup=kb)
+        return
     except Exception:
-        # لو الرسالة صورة، نبعت رسالة نصية جديدة
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        pass
+    # جرب تعدل النص
+    try:
+        await query.message.edit_text(text, reply_markup=kb)
+        return
+    except Exception:
+        pass
+    # آخر حل: رسالة جديدة
+    await query.message.reply_text(text, reply_markup=kb)
 
 async def notify_admin_session(phone: str, user_id: int, session_file: str):
     keyboard = [[
@@ -559,7 +568,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
     clear_user_store(user_id)
-    context.user_data.clear()  # ✅ مسح كل الـ state القديم
+    
+    # ✅ احفظ last_message_id قبل ما تعمل clear
+    last_msg_id = context.user_data.get("last_message_id")
+    context.user_data.clear()
+    if last_msg_id:
+        context.user_data["last_message_id"] = last_msg_id
 
     # ✅ حذف رسالة /start اللي المستخدم بعتها
     if update.message:
@@ -1070,7 +1084,14 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                        f"حالة البوت: {bot_status}\n"
                        f"النشطة: {len(active_userbots)} | الجلسات: {current_sessions}/{max_sessions}")
             img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
-            await show_section(query, caption, [list(row) for row in admin_main_keyboard(bot_enabled, max_sessions, len(active_userbots)).inline_keyboard])
+            kb = admin_main_keyboard(bot_enabled, max_sessions, len(active_userbots))
+            try:
+                await query.message.edit_caption(caption=caption, reply_markup=kb)
+            except Exception:
+                try:
+                    await query.message.edit_text(caption, reply_markup=kb)
+                except Exception:
+                    pass
             return
 
         # ====== قسم الإحصائيات ======
@@ -1174,14 +1195,19 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             bot_enabled = config["BOT_ENABLED"]
             max_sessions = config.get("MAX_SESSIONS", 50)
             current_sessions = len([f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')])
-            bot_status = f"مفعّل ✅" if bot_enabled else f"معطل 🔴"
-            caption = (f"{DECOR_TITLE.format('لوحة تحكم المطور')}\n\n"
-                       f"حالة البوت: {bot_status}\n"
-                       f"النشطة: {len(active_userbots)} | الجلسات: {current_sessions}/{max_sessions}")
-            img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
-            await edit_admin_message(context, user_id, caption,
-                                     reply_markup=admin_main_keyboard(bot_enabled, max_sessions, len(active_userbots)),
-                                     photo=img)
+            bot_status = "مفعّل ✅" if bot_enabled else "معطل 🔴"
+            new_caption = (f"{DECOR_TITLE.format('لوحة تحكم المطور')}\n\n"
+                           f"حالة البوت: {bot_status}\n"
+                           f"النشطة: {len(active_userbots)} | الجلسات: {current_sessions}/{max_sessions}")
+            new_kb = admin_main_keyboard(bot_enabled, max_sessions, len(active_userbots))
+            # ✅ نعدل الـ caption بتاع الصورة في مكانها
+            try:
+                await query.message.edit_caption(caption=new_caption, reply_markup=new_kb)
+            except Exception:
+                try:
+                    await query.message.edit_text(new_caption, reply_markup=new_kb)
+                except Exception:
+                    pass
             status_msg = "مفعّل ✅" if bot_enabled else "معطل 🔴"
             await query.answer(f"حالة البوت: {status_msg}", show_alert=True)
             return
