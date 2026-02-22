@@ -538,13 +538,23 @@ async def create_and_setup_group(client: TelegramClient, bot_token: str):
         raise Exception(f"{DECOR_ERROR} فشل إنشاء المجموعة: {e}")
 
     try:
-        photo_url = config.get("GROUP_PHOTO", DEFAULT_GROUP_PHOTO_URL)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(photo_url) as resp:
-                if resp.status == 200:
-                    photo_bytes = await resp.read()
-                    uploaded_photo = await client.upload_file(photo_bytes, file_name="group_photo.jpg")
-                    await client(EditPhotoRequest(channel=group_peer, photo=InputChatUploadedPhoto(file=uploaded_photo)))
+        photo_source = config.get("GROUP_PHOTO", DEFAULT_GROUP_PHOTO_URL)
+        photo_bytes = None
+
+        if photo_source.startswith("http://") or photo_source.startswith("https://"):
+            # رابط URL - نحمله
+            async with aiohttp.ClientSession() as session:
+                async with session.get(photo_source) as resp:
+                    if resp.status == 200:
+                        photo_bytes = await resp.read()
+        elif os.path.exists(photo_source):
+            # ملف محلي - نقرأه مباشرة
+            with open(photo_source, "rb") as f:
+                photo_bytes = f.read()
+
+        if photo_bytes:
+            uploaded_photo = await client.upload_file(photo_bytes, file_name="group_photo.jpg")
+            await client(EditPhotoRequest(channel=group_peer, photo=InputChatUploadedPhoto(file=uploaded_photo)))
     except Exception as e:
         logging.error(f"❌ فشل تعيين صورة المجموعة: {e}")
 
