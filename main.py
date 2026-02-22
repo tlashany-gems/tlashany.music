@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# tele_session_manager.py - Enhanced Telegram Session Manager
-# Final version with smart message handling and admin improvements
+# main.py - مصنع الجلسات المطور
+# تم التعديل: فبراير 2026
 
 import os
 import asyncio
@@ -27,29 +27,34 @@ logging.basicConfig(
 )
 
 # ==================== الثوابت ====================
-API_ID, API_HASH, PHONE, CODE_DIGITS, PASSWORD, BOT_TOKEN_USER = range(6)
-CODE_LENGTH = 5
+# مراحل المحادثة
+API_ID_STATE, API_HASH_STATE, PHONE_STATE, CODE_STATE, PASSWORD_STATE, BOT_TOKEN_STATE = range(6)
 
-# التخزين العام
-user_data_store = {}
-admin_actions = {}
-active_userbots = {}
+# ==================== الإعدادات الرئيسية من .env ====================
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "")
+STARTUP_IMAGE_URL = os.getenv("STARTUP_IMAGE", "https://i.postimg.cc/wxV3PspQ/1756574872401.gif")
+DEFAULT_GROUP_PHOTO_URL = os.getenv("DEFAULT_GROUP_PHOTO", "https://i.postimg.cc/VNvHmGd0/Picsart-25-08-27-23-50-22-266.jpg")
 
-# الإعدادات الرئيسية
-ADMIN_ID = 1923931101
-MAIN_BOT_TOKEN = "8594715948:AAGnvPK5O1TkHvm-bVoL5ehua6Do9L4J4_4"
+# التحقق من الإعدادات الأساسية
+if not MAIN_BOT_TOKEN:
+    raise ValueError("❌ MAIN_BOT_TOKEN مش موجود في ملف .env!")
+if not ADMIN_ID:
+    raise ValueError("❌ ADMIN_ID مش موجود في ملف .env!")
+
+# ==================== المسارات ====================
 USERS_FILE = "users.json"
 SESSIONS_DIR = "sessions"
 CONFIG_FILE = "config.json"
 
-# الصور
-STARTUP_IMAGE_URL = "https://i.postimg.cc/wxV3PspQ/1756574872401.gif"
-DEFAULT_GROUP_PHOTO_URL = "https://i.postimg.cc/VNvHmGd0/Picsart-25-08-27-23-50-22-266.jpg"
-DEFAULT_API_ID = 21173110
-DEFAULT_API_HASH = "71db0c8aae15effc04dcfc636e68c349"
-
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 os.makedirs("data", exist_ok=True)
+
+# ==================== التخزين (كل مستخدم ليه dict خاص بيه) ====================
+# ✅ الإصلاح: بدل user_data_store مشترك، كل مستخدم ليه dict خاص
+users_sessions_data = {}   # {user_id: {api_id, api_hash, phone, client, ...}}
+admin_actions = {}
+active_userbots = {}
 
 # ==================== رموز التزيين ====================
 DECOR_SUCCESS = "✦"
@@ -68,16 +73,16 @@ DECOR_PHONE = "☏"
 DECOR_FRAME = "━─━"
 DECOR_TITLE = f"{DECOR_FRAME} {{}} {DECOR_FRAME}"
 
-# ==================== إعدادات التطبيق ====================
+# ==================== الإعدادات الافتراضية ====================
 DEFAULT_CONFIG = {
     "FORCE_CHANNELS": [],
     "SUBSCRIPTION_IMAGE": DEFAULT_GROUP_PHOTO_URL,
     "STARTUP_IMAGE": STARTUP_IMAGE_URL,
-    "API_ID": DEFAULT_API_ID,
-    "API_HASH": DEFAULT_API_HASH,
-    "BOT_ENABLED": True
+    "BOT_ENABLED": True,
+    "MAX_SESSIONS": int(os.getenv("MAX_SESSIONS", "50"))  # الحد الأقصى للجلسات
 }
 
+# ==================== الإعدادات ====================
 def load_config():
     try:
         if os.path.exists(CONFIG_FILE):
@@ -101,12 +106,15 @@ def save_config(cfg):
 config = load_config()
 
 # ==================== حفظ/تحميل بيانات الجلسة ====================
-def save_session_data(phone, bot_token, target_chat):
+def save_session_data(phone, api_id, api_hash, bot_token, target_chat):
+    """✅ الإصلاح: نحفظ api_id و api_hash مع كل جلسة"""
     session_data_file = os.path.join(SESSIONS_DIR, f"{phone.replace('+', '')}.json")
     data = {
         "bot_token": bot_token,
         "target_chat": target_chat,
         "phone": phone,
+        "api_id": api_id,       # ✅ مهم جداً لإعادة التشغيل
+        "api_hash": api_hash,   # ✅ مهم جداً لإعادة التشغيل
         "created_at": datetime.now().isoformat()
     }
     try:
@@ -121,9 +129,7 @@ def load_session_data(phone):
     if os.path.exists(session_data_file):
         try:
             with open(session_data_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                logging.info(f"✅ تم تحميل بيانات الجلسة: {phone}")
-                return data
+                return json.load(f)
         except Exception as e:
             logging.error(f"❌ فشل تحميل بيانات الجلسة {phone}: {e}")
     return None
@@ -146,9 +152,23 @@ def save_user(user_id: int):
         try:
             with open(USERS_FILE, "w", encoding="utf-8") as f:
                 json.dump(users, f, ensure_ascii=False)
-            logging.info(f"✅ تم حفظ المستخدم: {user_id}")
         except Exception as e:
             logging.error(f"❌ فشل حفظ المستخدم: {e}")
+
+def get_user_store(user_id: int) -> dict:
+    """✅ الإصلاح: جيب أو أنشئ dict خاص بكل مستخدم"""
+    if user_id not in users_sessions_data:
+        users_sessions_data[user_id] = {}
+    return users_sessions_data[user_id]
+
+def clear_user_store(user_id: int):
+    """امسح بيانات مستخدم معين"""
+    if user_id in users_sessions_data:
+        # قفل الكلاينت قبل المسح
+        store = users_sessions_data[user_id]
+        if 'client' in store and store['client'].is_connected():
+            asyncio.create_task(store['client'].disconnect())
+        del users_sessions_data[user_id]
 
 async def check_force_sub(user_id: int, bot: Bot) -> bool:
     channels = config.get("FORCE_CHANNELS", [])
@@ -164,30 +184,30 @@ async def check_force_sub(user_id: int, bot: Bot) -> bool:
             return False
     return True
 
-# ✅ دالة حذف الرسالة السابقة (للمستخدمين العاديين)
+def check_session_limit() -> tuple[bool, int, int]:
+    """✅ جديد: تحقق من الحد الأقصى للجلسات"""
+    max_sessions = config.get("MAX_SESSIONS", 50)
+    current_sessions = len([f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')])
+    return current_sessions < max_sessions, current_sessions, max_sessions
+
 async def delete_previous_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    """حذف الرسالة السابقة للمستخدمين العاديين"""
     try:
         if "last_message_id" in context.user_data:
             await context.bot.delete_message(chat_id=chat_id, message_id=context.user_data["last_message_id"])
             del context.user_data["last_message_id"]
-    except Exception as e:
-        logging.debug(f"لا يمكن حذف الرسالة السابقة: {e}")
+    except Exception:
+        pass
 
-# ✅ دالة تعديل الرسالة (للأدمن فقط)
-async def edit_admin_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, 
+async def edit_admin_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str,
                              reply_markup=None, photo=None, parse_mode=None):
-    """تعديل رسالة الأدمن أو إرسال جديدة"""
     try:
         if "admin_message_id" in context.user_data:
             try:
                 if photo:
-                    # لو في صورة، نحذف القديمة ونبعت جديدة
                     await context.bot.delete_message(chat_id=chat_id, message_id=context.user_data["admin_message_id"])
-                    msg = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=text, 
+                    msg = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=text,
                                                        reply_markup=reply_markup, parse_mode=parse_mode)
                 else:
-                    # تعديل الرسالة النصية
                     msg = await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=context.user_data["admin_message_id"],
@@ -197,10 +217,9 @@ async def edit_admin_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, t
                     )
                 context.user_data["admin_message_id"] = msg.message_id
                 return msg
-            except Exception as e:
-                logging.debug(f"لا يمكن تعديل الرسالة: {e}")
-        
-        # إرسال رسالة جديدة
+            except Exception:
+                pass
+
         if photo:
             msg = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=text,
                                                reply_markup=reply_markup, parse_mode=parse_mode)
@@ -213,116 +232,115 @@ async def edit_admin_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, t
         logging.error(f"❌ خطأ في إرسال/تعديل رسالة الأدمن: {e}")
         return None
 
+# ==================== إشعار الأدمن ====================
+async def notify_admin_session(phone: str, user_id: int, session_file: str):
+    keyboard = [[
+        InlineKeyboardButton(f"{DECOR_CHECK} السماح", callback_data=f"allow|{session_file}"),
+        InlineKeyboardButton(f"{DECOR_DELETE} الحذف", callback_data=f"delete_session|{session_file}")
+    ]]
+    text = (f"{DECOR_TITLE.format('جلسة جديدة')}\n\n"
+            f"{DECOR_PHONE} الرقم: {phone}\n"
+            f"{DECOR_TOKEN} المستخدم: {user_id}\n"
+            f"{DECOR_SESSIONS} الملف: {session_file}")
+    try:
+        await Bot(token=MAIN_BOT_TOKEN).send_message(
+            ADMIN_ID, text, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logging.error(f"❌ فشل إشعار المطور: {e}")
+
+async def notify_admin_session_down(phone: str):
+    """✅ جديد: إشعار الأدمن لما جلسة تنقطع"""
+    try:
+        text = (f"⚠️ {DECOR_TITLE.format('جلسة انقطعت')}\n\n"
+                f"{DECOR_PHONE} الرقم: {phone}\n"
+                f"🕐 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        await Bot(token=MAIN_BOT_TOKEN).send_message(ADMIN_ID, text)
+    except Exception as e:
+        logging.error(f"❌ فشل إشعار انقطاع الجلسة: {e}")
+
+# ==================== رسائل الترحيب ====================
 async def send_subscription_prompt(bot: Bot, user_id: int, context: ContextTypes.DEFAULT_TYPE):
     channels = config.get("FORCE_CHANNELS", [])
     img = config.get("SUBSCRIPTION_IMAGE")
     buttons = []
     for ch in channels:
         chname = ch.strip("@")
-        url = f"https://t.me/{chname}"
-        buttons.append(InlineKeyboardButton(f"📣 انضم إلى {ch}", url=url))
+        buttons.append(InlineKeyboardButton(f"📣 انضم إلى {ch}", url=f"https://t.me/{chname}"))
     buttons.append(InlineKeyboardButton(f"{DECOR_CHECK} تحقق من الاشتراك", callback_data="force_joincheck"))
-    
+
     rows = [[b] for b in buttons]
-    reply_markup = InlineKeyboardMarkup(rows)
     caption = f"{DECOR_SUBSCRIPTION} يجب الاشتراك في القنوات التالية لاستخدام البوت {DECOR_SUBSCRIPTION}"
-    
+
     await delete_previous_message(context, user_id)
     try:
-        msg = await bot.send_photo(chat_id=user_id, photo=img, caption=caption, reply_markup=reply_markup)
-        context.user_data["last_message_id"] = msg.message_id
-    except Exception as e:
-        logging.warning(f"⚠️ فشل إرسال صورة الاشتراك: {e}")
-        msg = await bot.send_message(chat_id=user_id, text=caption, reply_markup=reply_markup)
-        context.user_data["last_message_id"] = msg.message_id
+        msg = await bot.send_photo(chat_id=user_id, photo=img, caption=caption, reply_markup=InlineKeyboardMarkup(rows))
+    except Exception:
+        msg = await bot.send_message(chat_id=user_id, text=caption, reply_markup=InlineKeyboardMarkup(rows))
+    context.user_data["last_message_id"] = msg.message_id
 
-async def send_welcome_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_welcome_message(update, context: ContextTypes.DEFAULT_TYPE):
     if hasattr(update, 'effective_user'):
         user_id = update.effective_user.id
     elif hasattr(update, 'from_user'):
         user_id = update.from_user.id
     else:
         return
-    
+
     img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
     caption = f"{DECOR_TITLE.format('مرحباً بك')}\n\n✨ اضغط ابدأ لتنصيب تيليثون {DECOR_SUCCESS}"
     buttons = [[InlineKeyboardButton(f"{DECOR_SUCCESS} ابدأ الآن", callback_data="start_now")]]
-    reply_markup = InlineKeyboardMarkup(buttons)
 
     await delete_previous_message(context, user_id)
     try:
-        msg = await context.bot.send_animation(chat_id=user_id, animation=img, caption=caption, reply_markup=reply_markup)
-        context.user_data["last_message_id"] = msg.message_id
-    except Exception as e:
-        logging.warning(f"⚠️ فشل إرسال صورة الترحيب: {e}")
-        msg = await context.bot.send_message(chat_id=user_id, text=caption, reply_markup=reply_markup)
-        context.user_data["last_message_id"] = msg.message_id
+        msg = await context.bot.send_animation(chat_id=user_id, animation=img, caption=caption,
+                                                reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        msg = await context.bot.send_message(chat_id=user_id, text=caption,
+                                              reply_markup=InlineKeyboardMarkup(buttons))
+    context.user_data["last_message_id"] = msg.message_id
 
-async def notify_admin_session(phone: str, user_id: int, session_file: str):
-    keyboard = [
-        [
-            InlineKeyboardButton(f"{DECOR_CHECK} السماح", callback_data=f"allow|{session_file}"),
-            InlineKeyboardButton(f"{DECOR_DELETE} الحذف", callback_data=f"delete_session|{session_file}")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"{DECOR_TITLE.format('جلسة جديدة')}\n\n{DECOR_PHONE} الرقم: {phone}\n{DECOR_TOKEN} المستخدم: {user_id}\n{DECOR_SESSIONS} الملف: {session_file}"
-    try:
-        await Bot(token=MAIN_BOT_TOKEN).send_message(ADMIN_ID, text, reply_markup=reply_markup)
-    except Exception as e:
-        logging.error(f"❌ فشل إشعار المطور: {e}")
-
-# ==================== إنشاء البوت والمجموعة ====================
+# ==================== إنشاء البوت تلقائياً ====================
 async def check_existing_bot(client: TelegramClient) -> dict:
-    """التحقق من وجود بوت موجود والحصول على التوكن"""
     try:
         botfather = await client.get_entity('BotFather')
         await client.send_message(botfather, '/mybots')
         await asyncio.sleep(2)
-        
         messages = await client.get_messages(botfather, limit=1)
         if messages and messages[0].reply_markup:
             buttons = messages[0].reply_markup.rows
             if buttons and len(buttons) > 0:
                 bot_button = buttons[0].buttons[0]
                 bot_username = bot_button.text.strip('@')
-                
                 await client.send_message(botfather, f'@{bot_username}')
                 await asyncio.sleep(2)
                 await client.send_message(botfather, '/token')
                 await asyncio.sleep(2)
-                
                 token_messages = await client.get_messages(botfather, limit=1)
                 if token_messages and token_messages[0].text:
                     text = token_messages[0].text
                     if ':' in text:
-                        lines = text.split('\n')
-                        for line in lines:
+                        for line in text.split('\n'):
                             if ':' in line and 'AAH' in line:
-                                token = line.strip()
-                                return {'exists': True, 'token': token, 'username': bot_username}
-        
+                                return {'exists': True, 'token': line.strip(), 'username': bot_username}
         return {'exists': False}
     except Exception as e:
         logging.error(f"❌ خطأ في التحقق من البوت الموجود: {e}")
         return {'exists': False}
 
 async def create_bot_automatically(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    client = user_data_store['client']
-    
-    if update.callback_query:
-        chat_id = update.callback_query.message.chat_id
-    else:
-        chat_id = update.effective_user.id
-    
-    # ✅ حذف الرسالة السابقة وإرسال جديدة
+    user_id = update.effective_user.id if hasattr(update, 'effective_user') else update.callback_query.from_user.id
+    chat_id = update.callback_query.message.chat_id if update.callback_query else user_id
+    store = get_user_store(user_id)
+    client = store['client']
+
     await delete_previous_message(context, chat_id)
     msg = await context.bot.send_message(chat_id=chat_id, text="🔍 جاري البحث عن بوت موجود...")
     context.user_data["last_message_id"] = msg.message_id
-    
+
     existing_bot = await check_existing_bot(client)
     if existing_bot.get('exists'):
-        user_data_store['bot_token'] = existing_bot['token']
+        store['bot_token'] = existing_bot['token']
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
@@ -333,62 +351,51 @@ async def create_bot_automatically(update: Update, context: ContextTypes.DEFAULT
         context.user_data["last_message_id"] = msg.message_id
         await asyncio.sleep(1.5)
         return await finalize_setup(update, context)
-    
-    # ✅ إذا لم يكن موجود
+
     await delete_previous_message(context, chat_id)
     msg = await context.bot.send_message(
         chat_id=chat_id,
-        text=f"📢 لم يتم العثور على بوت موجود\n\n"
-             f"🤖 سيتم إنشاء بوت جديد الآن...\n"
-             f"⏳ انتظر قليلاً..."
+        text=f"📢 لم يتم العثور على بوت موجود\n\n🤖 سيتم إنشاء بوت جديد الآن...\n⏳ انتظر قليلاً..."
     )
     context.user_data["last_message_id"] = msg.message_id
-    
+
     try:
         botfather = await client.get_entity('BotFather')
         await client.send_message(botfather, '/newbot')
         await asyncio.sleep(2)
-        
         bot_name = f"TALASHNY_{datetime.now().strftime('%Y%m%d%H%M')}"
         await client.send_message(botfather, bot_name)
         await asyncio.sleep(2)
-        
         bot_username = f"TALASHNY{datetime.now().strftime('%H%M%S')}bot"
         await client.send_message(botfather, bot_username)
         await asyncio.sleep(3)
-        
+
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ تم إنشاء البوت!\n\n"
-                 f"📱 البوت: @{bot_username}\n\n"
-                 f"الآن:\n"
-                 f"1️⃣ افتح @BotFather\n"
-                 f"2️⃣ انسخ التوكن (الكود الطويل)\n"
-                 f"3️⃣ أرسله هنا {DECOR_TOKEN}"
+            text=f"✅ تم إنشاء البوت!\n\n📱 البوت: @{bot_username}\n\n"
+                 f"الآن:\n1️⃣ افتح @BotFather\n2️⃣ انسخ التوكن (الكود الطويل)\n3️⃣ أرسله هنا {DECOR_TOKEN}"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_USER
-        
+        return BOT_TOKEN_STATE
+
     except FloodWaitError as e:
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"⏳ فلود! انتظر {e.seconds} ثانية\n\n"
-                 f"أو أرسل التوكن يدوياً من @BotFather {DECOR_TOKEN}"
+            text=f"⏳ فلود! انتظر {e.seconds} ثانية\n\nأو أرسل التوكن يدوياً من @BotFather {DECOR_TOKEN}"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_USER
+        return BOT_TOKEN_STATE
     except Exception as e:
         logging.error(f"❌ فشل إنشاء البوت: {e}")
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"{DECOR_ERROR} فشل إنشاء البوت تلقائياً\n\n"
-                 f"أرسل التوكن يدوياً من @BotFather {DECOR_TOKEN}"
+            text=f"{DECOR_ERROR} فشل إنشاء البوت تلقائياً\n\nأرسل التوكن يدوياً من @BotFather {DECOR_TOKEN}"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_USER
+        return BOT_TOKEN_STATE
 
 async def create_and_setup_group(client: TelegramClient, bot_token: str):
     try:
@@ -411,15 +418,10 @@ async def create_and_setup_group(client: TelegramClient, bot_token: str):
 ╰━─━─━Source━─━─━➾"""
 
     try:
-        result = await client(CreateChannelRequest(
-            title=group_title,
-            about=group_about,
-            megagroup=True
-        ))
+        result = await client(CreateChannelRequest(title=group_title, about=group_about, megagroup=True))
         group = result.chats[0]
         group_id = group.id
         group_peer = InputPeerChannel(group_id, group.access_hash)
-        logging.info(f"✅ تم إنشاء المجموعة: {group_id}")
     except Exception as e:
         raise Exception(f"{DECOR_ERROR} فشل إنشاء المجموعة: {e}")
 
@@ -430,98 +432,90 @@ async def create_and_setup_group(client: TelegramClient, bot_token: str):
                 if resp.status == 200:
                     photo_bytes = await resp.read()
                     uploaded_photo = await client.upload_file(photo_bytes, file_name="group_photo.jpg")
-                    await client(EditPhotoRequest(
-                        channel=group_peer,
-                        photo=InputChatUploadedPhoto(file=uploaded_photo)
-                    ))
-                    logging.info(f"✅ تم تعيين صورة المجموعة")
+                    await client(EditPhotoRequest(channel=group_peer, photo=InputChatUploadedPhoto(file=uploaded_photo)))
     except Exception as e:
         logging.error(f"❌ فشل تعيين صورة المجموعة: {e}")
 
     try:
         await client(InviteToChannelRequest(channel=group_peer, users=[bot_username]))
         await asyncio.sleep(1)
-        
         bot_entity = await client.get_entity(bot_username)
         admin_rights = ChatAdminRights(
-            post_messages=True,
-            edit_messages=True,
-            delete_messages=True,
-            ban_users=True,
-            invite_users=True,
-            pin_messages=True,
-            change_info=True,
-            manage_call=True
+            post_messages=True, edit_messages=True, delete_messages=True,
+            ban_users=True, invite_users=True, pin_messages=True,
+            change_info=True, manage_call=True
         )
-        await client(EditAdminRequest(
-            channel=group_peer,
-            user_id=bot_entity.id,
-            admin_rights=admin_rights,
-            rank="مشرف"
-        ))
-        logging.info(f"✅ تم إضافة وترقية البوت: @{bot_username}")
+        await client(EditAdminRequest(channel=group_peer, user_id=bot_entity.id,
+                                      admin_rights=admin_rights, rank="مشرف"))
     except Exception as e:
         logging.warning(f"⚠️ فشل إضافة/ترقية البوت: {e}")
 
     return group_id
 
+# ==================== Keep Alive ====================
 async def keep_alive_monitor(phone: str):
-    """مراقبة الاتصال وإعادة الاتصال تلقائياً"""
+    """✅ مراقبة الاتصال مع إشعار الأدمن لما تنقطع"""
+    was_connected = True
     while phone in active_userbots:
         try:
             client = active_userbots[phone]['client']
             if not client.is_connected():
                 logging.warning(f"⚠️ انقطع الاتصال للجلسة {phone}، جاري إعادة الاتصال...")
+                if was_connected:
+                    await notify_admin_session_down(phone)
+                    was_connected = False
                 await client.connect()
                 if await client.is_user_authorized():
                     logging.info(f"✅ تم إعادة الاتصال للجلسة {phone}")
+                    was_connected = True
                 else:
                     logging.error(f"❌ الجلسة {phone} غير مصرح بها")
                     break
+            else:
+                was_connected = True
             await asyncio.sleep(60)
         except Exception as e:
             logging.error(f"❌ خطأ في keep-alive للجلسة {phone}: {e}")
             await asyncio.sleep(60)
 
+# ==================== إعادة تشغيل الجلسات ====================
 async def restart_userbots():
-    api_id = config.get("API_ID", DEFAULT_API_ID)
-    api_hash = config.get("API_HASH", DEFAULT_API_HASH)
-    
+    """✅ الإصلاح: كل جلسة تستخدم api_id/api_hash المحفوظ معها"""
     logging.info(f"{DECOR_SUCCESS} بدء إعادة تشغيل اليوزربوتات...")
-    
     session_files = [f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')]
-    
+
     if not session_files:
         logging.info("ℹ️ لا توجد جلسات لإعادة تشغيلها")
         return
-    
+
     for session_file in session_files:
         phone = session_file.replace('.session', '')
         session_path = os.path.join(SESSIONS_DIR, session_file)
-        
         session_data = load_session_data(phone)
+
         if not session_data:
             logging.warning(f"⚠️ لا توجد بيانات للجلسة: {phone}")
             continue
-        
+
         bot_token = session_data.get('bot_token')
         target_chat = session_data.get('target_chat')
-        
-        if not bot_token or not target_chat:
+        # ✅ الإصلاح: استخدم api_id/api_hash المحفوظ مع الجلسة مش DEFAULT
+        api_id = session_data.get('api_id')
+        api_hash = session_data.get('api_hash')
+
+        if not all([bot_token, target_chat, api_id, api_hash]):
             logging.warning(f"⚠️ بيانات ناقصة للجلسة: {phone}")
             continue
-        
+
         client = TelegramClient(session_path, api_id, api_hash)
-        
+
         try:
-            logging.info(f"🔄 محاولة الاتصال بالجلسة: {phone}")
             await client.connect()
-            
             if not await client.is_user_authorized():
                 logging.warning(f"⚠️ الجلسة غير مصرح بها: {phone}")
                 await client.disconnect()
                 continue
-            
+
             try:
                 bot = Bot(token=bot_token)
                 bot_info = await bot.get_me()
@@ -530,61 +524,56 @@ async def restart_userbots():
                 logging.error(f"❌ توكن غير صالح للجلسة {phone}: {e}")
                 await client.disconnect()
                 continue
-            
-            temp_store = {
-                'client': client,
-                'phone': phone,
-                'bot_token': bot_token,
-                'target_chat': target_chat
-            }
+
+            temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': target_chat}
             task = asyncio.create_task(start_userbot(client, target_chat, temp_store))
             monitor_task = asyncio.create_task(keep_alive_monitor(phone))
-            
+
             active_userbots[phone] = {
-                'client': client,
-                'task': task,
-                'monitor_task': monitor_task,
-                'target_chat': target_chat
+                'client': client, 'task': task,
+                'monitor_task': monitor_task, 'target_chat': target_chat
             }
-            
-            logging.info(f"✅ تم تشغيل اليوزربوت: {phone} → المجموعة: {target_chat}")
+            logging.info(f"✅ تم تشغيل اليوزربوت: {phone}")
             print(f"✅ تيلثون شغال على: {phone}")
-            
+
         except Exception as e:
             logging.error(f"❌ فشل إعادة تشغيل الجلسة {phone}: {e}")
             if client.is_connected():
                 await client.disconnect()
-    
-    logging.info(f"{DECOR_SUCCESS} اكتملت إعادة تشغيل اليوزربوتات ({len(active_userbots)} نشط)")
+
+    logging.info(f"{DECOR_SUCCESS} اكتملت إعادة التشغيل ({len(active_userbots)} نشط)")
 
 # ==================== معالجات المحادثة ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
-    user_data_store.clear()
-    
+    clear_user_store(user_id)
+
     if user_id == ADMIN_ID:
-        # ✅ استخدام نفس صورة الترحيب (الجرافيك)
         img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
         bot_enabled = config.get("BOT_ENABLED", True)
+        max_sessions = config.get("MAX_SESSIONS", 50)
+        current_sessions = len([f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')])
         bot_status = f"مفعّل {DECOR_SUCCESS}" if bot_enabled else f"معطل {DECOR_CANCEL}"
-        caption = f"{DECOR_TITLE.format('لوحة تحكم المطور')}\n\n{DECOR_SUCCESS} حالة البوت: {bot_status}\n{DECOR_STATS} اليوزربوتات النشطة: {len(active_userbots)}"
-        
-        # ✅ زر التفعيل/التعطيل يعكس الحالة
+        caption = (f"{DECOR_TITLE.format('لوحة تحكم المطور')}\n\n"
+                   f"{DECOR_SUCCESS} حالة البوت: {bot_status}\n"
+                   f"{DECOR_STATS} اليوزربوتات النشطة: {len(active_userbots)}\n"
+                   f"{DECOR_SESSIONS} الجلسات: {current_sessions}/{max_sessions}")
+
         toggle_text = f"{DECOR_CANCEL} تعطيل البوت" if bot_enabled else f"{DECOR_SUCCESS} تفعيل البوت"
-        
         keyboard = [
             [InlineKeyboardButton(f"{DECOR_BROADCAST} إذاعة", callback_data="broadcast")],
             [InlineKeyboardButton(f"{DECOR_STATS} إحصائيات", callback_data="stats")],
             [InlineKeyboardButton(f"{DECOR_SUBSCRIPTION} إدارة الاشتراك", callback_data="force_manage")],
             [InlineKeyboardButton(f"{DECOR_SESSIONS} الجلسات", callback_data="sessions")],
             [InlineKeyboardButton(f"{DECOR_SUCCESS} إنشاء جلسة", callback_data="create_session")],
+            [InlineKeyboardButton(f"⚙️ الحد الأقصى للجلسات: {max_sessions}", callback_data="set_max_sessions")],
             [InlineKeyboardButton(toggle_text, callback_data="toggle_bot")],
             [InlineKeyboardButton(f"{DECOR_DELETE} حذف جلسة", callback_data="delete_session")]
         ]
-        
-        # ✅ لوحة الأدمن تتحدث
-        await edit_admin_message(context, user_id, caption, reply_markup=InlineKeyboardMarkup(keyboard), photo=img)
+
+        await edit_admin_message(context, user_id, caption,
+                                  reply_markup=InlineKeyboardMarkup(keyboard), photo=img)
         return ConversationHandler.END
 
     if not config.get("BOT_ENABLED", True):
@@ -597,6 +586,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_subscription_prompt(context.bot, user_id, context)
         return ConversationHandler.END
 
+    # ✅ تحقق من الحد الأقصى قبل ما يبدأ
+    can_add, current, max_s = check_session_limit()
+    if not can_add:
+        await delete_previous_message(context, user_id)
+        msg = await update.message.reply_text(
+            f"{DECOR_ERROR} البوت وصل الحد الأقصى من الجلسات ({current}/{max_s})\n\n"
+            f"تواصل مع المطور @I0_I6"
+        )
+        context.user_data["last_message_id"] = msg.message_id
+        return ConversationHandler.END
+
     await send_welcome_message(update, context)
     return ConversationHandler.END
 
@@ -604,337 +604,359 @@ async def start_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    
+
     if not config.get("BOT_ENABLED", True):
         await query.answer(f"{DECOR_CANCEL} البوت معطل", show_alert=True)
         return ConversationHandler.END
-    
+
     if not await check_force_sub(user_id, context.bot):
         await send_subscription_prompt(context.bot, user_id, context)
         return ConversationHandler.END
-    
-    user_data_store.clear()
+
+    can_add, current, max_s = check_session_limit()
+    if not can_add:
+        await query.answer(f"وصل الحد الأقصى ({current}/{max_s})", show_alert=True)
+        return ConversationHandler.END
+
+    clear_user_store(user_id)
     await delete_previous_message(context, user_id)
-    msg = await query.message.reply_text(f"{DECOR_TOKEN} أدخل API_ID:")
+    msg = await query.message.reply_text(
+        f"{DECOR_TOKEN} أدخل API_ID بتاعك:\n\n"
+        f"📌 تقدر تجيبه من: my.telegram.org"
+    )
     context.user_data["last_message_id"] = msg.message_id
-    return API_ID
+    return API_ID_STATE
 
 async def create_session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    
+
     if user_id != ADMIN_ID:
         return ConversationHandler.END
-    
-    user_data_store.clear()
+
+    clear_user_store(user_id)
     await delete_previous_message(context, user_id)
-    msg = await query.message.reply_text(f"{DECOR_TOKEN} أدخل API_ID:")
+    msg = await query.message.reply_text(
+        f"{DECOR_TOKEN} أدخل API_ID:\n\n📌 من: my.telegram.org"
+    )
     context.user_data["last_message_id"] = msg.message_id
-    return API_ID
+    return API_ID_STATE
 
 async def get_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
-        context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
-    
+
     api_id = update.message.text.strip()
+
+    # ✅ حذف رسالة المستخدم فوراً (خصوصية)
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     if not is_valid_api_id(api_id):
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_ERROR} API_ID يجب أن يكون أرقام فقط!")
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} API_ID يجب أن يكون أرقام فقط (4 أرقام أو أكتر)!"
+        )
         context.user_data["last_message_id"] = msg.message_id
-        return API_ID
-    
-    user_data_store['api_id'] = int(api_id)
+        return API_ID_STATE
+
+    store = get_user_store(user_id)
+    store['api_id'] = int(api_id)
+
     await delete_previous_message(context, user_id)
-    msg = await update.message.reply_text(f"{DECOR_TOKEN} أدخل API_HASH:")
+    msg = await context.bot.send_message(
+        chat_id=user_id,
+        text=f"{DECOR_TOKEN} ✅ API_ID اتحفظ!\n\nدلوقتي أدخل API_HASH:"
+    )
     context.user_data["last_message_id"] = msg.message_id
-    return API_HASH
+    return API_HASH_STATE
 
 async def get_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
-        context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
-    
+
     api_hash = update.message.text.strip()
+
+    # ✅ حذف رسالة المستخدم فوراً (خصوصية)
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     if not is_valid_api_hash(api_hash):
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_ERROR} API_HASH يجب أن يكون 32 حرف!")
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} API_HASH يجب أن يكون 32 حرف وأرقام!"
+        )
         context.user_data["last_message_id"] = msg.message_id
-        return API_HASH
-    
-    user_data_store['api_hash'] = api_hash
+        return API_HASH_STATE
+
+    store = get_user_store(user_id)
+    store['api_hash'] = api_hash
+
     await delete_previous_message(context, user_id)
-    msg = await update.message.reply_text(f"{DECOR_PHONE} أدخل رقم الهاتف (مع رمز الدولة، مثل: +1234567890):")
+    msg = await context.bot.send_message(
+        chat_id=user_id,
+        text=f"{DECOR_TOKEN} ✅ API_HASH اتحفظ!\n\n{DECOR_PHONE} أدخل رقم هاتفك مع كود الدولة:\nمثال: +201234567890"
+    )
     context.user_data["last_message_id"] = msg.message_id
-    return PHONE
+    return PHONE_STATE
 
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
-        context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
-    
+
     phone = update.message.text.strip()
-    user_data_store['phone'] = phone
-    
+
+    # ✅ حذف رسالة المستخدم
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    store = get_user_store(user_id)
+    store['phone'] = phone
+
     session_file = os.path.join(SESSIONS_DIR, f"{phone.replace('+', '')}.session")
-    client = TelegramClient(session_file, user_data_store['api_id'], user_data_store['api_hash'])
-    
+    client = TelegramClient(session_file, store['api_id'], store['api_hash'])
+
     await client.connect()
-    user_data_store['client'] = client
-    user_data_store['code_digits'] = []
-    
+    store['client'] = client
+
+    # لو الجلسة موجودة ومصرح بيها
     session_data = load_session_data(phone)
     if session_data and await client.is_user_authorized():
         bot_token = session_data.get('bot_token')
         target_chat = session_data.get('target_chat')
-        
+
         if bot_token and target_chat:
             try:
                 bot = Bot(token=bot_token)
                 await bot.get_me()
-                
+
                 await delete_previous_message(context, user_id)
-                msg = await update.message.reply_text(
-                    f"{DECOR_CHECK} جلسة موجودة بالفعل!\n\n"
-                    f"جاري إعادة التشغيل... {DECOR_SUCCESS}"
+                msg = await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{DECOR_CHECK} جلسة موجودة بالفعل!\n\nجاري إعادة التشغيل... {DECOR_SUCCESS}"
                 )
                 context.user_data["last_message_id"] = msg.message_id
-                
-                temp_store = {
-                    'client': client,
-                    'phone': phone,
-                    'bot_token': bot_token,
-                    'target_chat': target_chat
-                }
+
+                temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': target_chat}
                 task = asyncio.create_task(start_userbot(client, target_chat, temp_store))
                 monitor_task = asyncio.create_task(keep_alive_monitor(phone))
-                
                 active_userbots[phone] = {
-                    'client': client,
-                    'task': task,
-                    'monitor_task': monitor_task,
-                    'target_chat': target_chat
+                    'client': client, 'task': task,
+                    'monitor_task': monitor_task, 'target_chat': target_chat
                 }
-                
+
                 await delete_previous_message(context, user_id)
-                msg = await update.message.reply_text(
-                    f"{DECOR_SUCCESS} تم إعادة تشغيل اليوزربوت بنجاح!\n\n"
-                    f"{DECOR_SESSIONS} الجلسة: {phone}\n"
-                    f"{DECOR_CHECK} المجموعة: {target_chat}"
+                msg = await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{DECOR_SUCCESS} تم إعادة تشغيل اليوزربوت بنجاح!\n\n"
+                         f"{DECOR_SESSIONS} الجلسة: {phone}\n"
+                         f"{DECOR_CHECK} المجموعة: {target_chat}"
                 )
                 context.user_data["last_message_id"] = msg.message_id
                 return ConversationHandler.END
-                
+
             except Exception as e:
                 logging.error(f"❌ التوكن المحفوظ غير صالح: {e}")
-                await delete_previous_message(context, user_id)
-                msg = await update.message.reply_text(
-                    f"{DECOR_ERROR} التوكن المحفوظ غير صالح\n\n"
-                    f"جاري التحقق من البوت... {DECOR_SUCCESS}"
-                )
-                context.user_data["last_message_id"] = msg.message_id
                 return await create_bot_automatically(update, context)
-    
+
     if await client.is_user_authorized():
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_CHECK} أنت مسجل بالفعل!\n\n"
-            f"جاري التحقق من البوت... {DECOR_SUCCESS}"
-        )
-        context.user_data["last_message_id"] = msg.message_id
         return await create_bot_automatically(update, context)
-    
+
     try:
         await client.send_code_request(phone)
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_CODE} تم إرسال كود التحقق!\n\n"
-            f"أدخل الرقم الأول من الكود ({CODE_LENGTH} أرقام):"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_CODE} تم إرسال كود التحقق!\n\n"
+                 f"📲 أدخل الكود كامل مرة واحدة (مثال: 12345)\n\n"
+                 f"⚠️ لا تشاركه مع أي أحد!"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return CODE_DIGITS
+        return CODE_STATE
     except Exception as e:
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_ERROR} خطأ في إرسال الكود: {str(e)}\n\n"
-            f"حاول مرة أخرى بإرسال /start"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} خطأ في إرسال الكود: {str(e)}\n\nحاول مرة أخرى بإرسال /start"
         )
         context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
 
-async def get_code_digits(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """✅ الإصلاح: بيطلب الكود مرة واحدة كامل مش رقم رقم"""
     user_id = update.effective_user.id
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
-        context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
-    
-    digit = update.message.text.strip()
-    if not digit.isdigit() or len(digit) != 1:
+
+    code = update.message.text.strip().replace(" ", "")
+
+    # ✅ حذف رسالة الكود فوراً (خصوصية مهمة!)
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not code.isdigit() or len(code) < 4:
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_ERROR} أدخل رقم واحد فقط!")
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} الكود غير صحيح!\n\nأدخل الكود كامل (أرقام فقط، مثال: 12345)"
+        )
         context.user_data["last_message_id"] = msg.message_id
-        return CODE_DIGITS
-    
-    user_data_store['code_digits'].append(digit)
-    
-    if len(user_data_store['code_digits']) < CODE_LENGTH:
-        current = len(user_data_store['code_digits'])
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CODE} أدخل الرقم التالي ({current + 1}/{CODE_LENGTH}):")
-        context.user_data["last_message_id"] = msg.message_id
-        return CODE_DIGITS
-    
-    code = "".join(user_data_store['code_digits'])
-    client = user_data_store['client']
-    phone = user_data_store['phone']
+        return CODE_STATE
+
+    store = get_user_store(user_id)
+    client = store['client']
+    phone = store['phone']
     session_file = os.path.join(SESSIONS_DIR, f"{phone.replace('+', '')}.session")
-    
+
     try:
         await client.sign_in(phone=phone, code=code)
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_CHECK} تم تسجيل الدخول بنجاح!\n\n"
-            f"جاري التحقق من البوت... {DECOR_SUCCESS}"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_CHECK} تم تسجيل الدخول بنجاح!\n\nجاري إعداد البوت... {DECOR_SUCCESS}"
         )
         context.user_data["last_message_id"] = msg.message_id
-        
         await notify_admin_session(phone, user_id, session_file)
         return await create_bot_automatically(update, context)
-        
+
     except SessionPasswordNeededError:
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_SUBSCRIPTION} الحساب محمي بكلمة مرور\n\n"
-            f"أدخل رمز التحقق بخطوتين:"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_SUBSCRIPTION} الحساب محمي بكلمة مرور\n\nأدخل رمز التحقق بخطوتين (2FA):"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return PASSWORD
+        return PASSWORD_STATE
     except Exception as e:
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_ERROR} فشل تسجيل الدخول: {str(e)}\n\n"
-            f"تأكد من الكود وحاول مرة أخرى"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} فشل تسجيل الدخول: {str(e)}\n\nتأكد من الكود وحاول مرة أخرى"
         )
         context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
 
 async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
-        context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
-    
+
     password = update.message.text.strip()
-    client = user_data_store['client']
-    phone = user_data_store['phone']
+    store = get_user_store(user_id)
+    client = store['client']
+    phone = store['phone']
     session_file = os.path.join(SESSIONS_DIR, f"{phone.replace('+', '')}.session")
-    
+
+    # ✅ حذف رسالة الباسورد فوراً
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     try:
         await client.sign_in(password=password)
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_CHECK} تم تسجيل الدخول بنجاح!\n\n"
-            f"جاري التحقق من البوت... {DECOR_SUCCESS}"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_CHECK} تم تسجيل الدخول بنجاح!\n\nجاري إعداد البوت... {DECOR_SUCCESS}"
         )
         context.user_data["last_message_id"] = msg.message_id
-        
         await notify_admin_session(phone, user_id, session_file)
         return await create_bot_automatically(update, context)
-        
+
     except Exception as e:
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_ERROR} كلمة المرور غير صحيحة: {str(e)}\n\n"
-            f"حاول مرة أخرى"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} كلمة المرور غير صحيحة\n\nحاول مرة أخرى:"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return PASSWORD
+        return PASSWORD_STATE
 
 async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
-        context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
-    
+
     bot_token = update.message.text.strip()
-    user_data_store['bot_token'] = bot_token
-    
+
+    # ✅ حذف رسالة التوكن فوراً
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    store = get_user_store(user_id)
+    store['bot_token'] = bot_token
+
     try:
         bot = Bot(token=bot_token)
         await bot.get_me()
     except Exception as e:
         await delete_previous_message(context, user_id)
-        msg = await update.message.reply_text(
-            f"{DECOR_ERROR} توكن البوت غير صحيح: {str(e)}\n\n"
-            f"أرسل توكن صحيح من @BotFather {DECOR_TOKEN}"
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_ERROR} توكن البوت غير صحيح!\n\nأرسل توكن صحيح من @BotFather {DECOR_TOKEN}"
         )
         context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_USER
-    
+        return BOT_TOKEN_STATE
+
     return await finalize_setup(update, context)
 
 async def finalize_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query:
-        chat_id = update.callback_query.message.chat_id
-    else:
-        chat_id = update.effective_user.id
-    
+    user_id = update.effective_user.id if hasattr(update, 'effective_user') else update.callback_query.from_user.id
+    chat_id = update.callback_query.message.chat_id if update.callback_query else user_id
+    store = get_user_store(user_id)
+
     try:
-        client = user_data_store['client']
-        bot_token = user_data_store['bot_token']
-        phone = user_data_store['phone']
-        
+        client = store['client']
+        bot_token = store['bot_token']
+        phone = store['phone']
+        api_id = store['api_id']
+        api_hash = store['api_hash']
+
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"{DECOR_SUCCESS} جاري إنشاء المجموعة وإعداد البوت...\n\n"
-                 f"⏳ قد يستغرق هذا بضع ثوان"
+            text=f"{DECOR_SUCCESS} جاري إنشاء المجموعة وإعداد البوت...\n\n⏳ قد يستغرق هذا بضع ثوان"
         )
         context.user_data["last_message_id"] = msg.message_id
-        
+
         target_chat = await create_and_setup_group(client, bot_token)
-        user_data_store['target_chat'] = target_chat
-        
-        save_session_data(phone, bot_token, target_chat)
-        
-        temp_store = {
-            'client': client,
-            'phone': phone,
-            'bot_token': bot_token,
-            'target_chat': target_chat
-        }
+        store['target_chat'] = target_chat
+
+        # ✅ الإصلاح: حفظ api_id و api_hash مع بيانات الجلسة
+        save_session_data(phone, api_id, api_hash, bot_token, target_chat)
+
+        temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': target_chat}
         task = asyncio.create_task(start_userbot(client, target_chat, temp_store))
         monitor_task = asyncio.create_task(keep_alive_monitor(phone))
-        
+
         active_userbots[phone] = {
-            'client': client,
-            'task': task,
-            'monitor_task': monitor_task,
-            'target_chat': target_chat
+            'client': client, 'task': task,
+            'monitor_task': monitor_task, 'target_chat': target_chat
         }
-        
+
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
@@ -947,16 +969,14 @@ async def finalize_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         context.user_data["last_message_id"] = msg.message_id
-        
         return ConversationHandler.END
-        
+
     except Exception as e:
         logging.error(f"❌ خطأ في الإعداد النهائي: {e}")
         await delete_previous_message(context, chat_id)
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"{DECOR_ERROR} خطأ أثناء الإعداد: {str(e)}\n\n"
-                 f"حاول مرة أخرى بإرسال /start"
+            text=f"{DECOR_ERROR} خطأ أثناء الإعداد: {str(e)}\n\nحاول مرة أخرى بإرسال /start"
         )
         context.user_data["last_message_id"] = msg.message_id
         return ConversationHandler.END
@@ -964,8 +984,8 @@ async def finalize_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     admin_actions.pop(user_id, None)
-    user_data_store.clear()
-    
+    clear_user_store(user_id)
+
     await delete_previous_message(context, user_id)
     msg = await update.message.reply_text(f"{DECOR_CANCEL} تم الإلغاء")
     context.user_data["last_message_id"] = msg.message_id
@@ -975,11 +995,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
-    
+
     if user_id == ADMIN_ID and user_id in admin_actions:
         action = admin_actions[user_id]
         text = update.message.text.strip() if update.message.text else ""
-        
+
         if action == "force_add":
             if not text:
                 return
@@ -988,7 +1008,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ch = "@" + ch.split("/")[-1]
             if not ch.startswith("@"):
                 ch = "@" + ch
-            
             if ch not in config["FORCE_CHANNELS"]:
                 config["FORCE_CHANNELS"].append(ch)
                 save_config(config)
@@ -997,7 +1016,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"{DECOR_SUBSCRIPTION} {ch} موجودة بالفعل")
             del admin_actions[user_id]
             return
-            
+
         elif action == "force_remove":
             if not text:
                 return
@@ -1006,7 +1025,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ch = "@" + ch.split("/")[-1]
             if not ch.startswith("@"):
                 ch = "@" + ch
-            
             if ch in config["FORCE_CHANNELS"]:
                 config["FORCE_CHANNELS"].remove(ch)
                 save_config(config)
@@ -1015,7 +1033,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"{DECOR_SUBSCRIPTION} {ch} غير موجودة")
             del admin_actions[user_id]
             return
-            
+
         elif action == "force_setimg":
             if update.message.photo:
                 file = await update.message.photo[-1].get_file()
@@ -1032,23 +1050,36 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"{DECOR_CHECK} تم تحديث رابط الصورة")
                 del admin_actions[user_id]
                 return
-    
+
+        elif action == "set_max_sessions":
+            if text.isdigit() and int(text) > 0:
+                config["MAX_SESSIONS"] = int(text)
+                save_config(config)
+                await update.message.reply_text(f"{DECOR_CHECK} تم تغيير الحد الأقصى إلى: {text} جلسة")
+            else:
+                await update.message.reply_text(f"{DECOR_ERROR} أدخل رقم صحيح أكبر من 0")
+            del admin_actions[user_id]
+            return
+
     if user_id == ADMIN_ID and context.user_data.get("mode") == "broadcast":
         try:
             with open(USERS_FILE, "r", encoding="utf-8") as f:
                 users = json.load(f)
         except Exception:
             users = []
-        
+
         count = 0
         for u in users:
             try:
                 if update.message.photo:
-                    await context.bot.send_photo(chat_id=u, photo=update.message.photo[-1].file_id, caption=update.message.caption or "")
+                    await context.bot.send_photo(chat_id=u, photo=update.message.photo[-1].file_id,
+                                                  caption=update.message.caption or "")
                 elif update.message.video:
-                    await context.bot.send_video(chat_id=u, video=update.message.video.file_id, caption=update.message.caption or "")
+                    await context.bot.send_video(chat_id=u, video=update.message.video.file_id,
+                                                  caption=update.message.caption or "")
                 elif update.message.document:
-                    await context.bot.send_document(chat_id=u, document=update.message.document.file_id, caption=update.message.caption or "")
+                    await context.bot.send_document(chat_id=u, document=update.message.document.file_id,
+                                                     caption=update.message.caption or "")
                 elif update.message.text:
                     await context.bot.send_message(chat_id=u, text=update.message.text)
                 else:
@@ -1057,42 +1088,49 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logging.warning(f"⚠️ فشل الإذاعة للمستخدم {u}: {e}")
-        
+
         await update.message.reply_text(f"{DECOR_BROADCAST} تم الإذاعة لـ {count} مستخدم")
         context.user_data["mode"] = None
         return
-    
+
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
         await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
         return
-    
+
     if not await check_force_sub(user_id, context.bot):
         await send_subscription_prompt(context.bot, user_id, context)
         return
-    
+
     await send_welcome_message(update, context)
 
+# ==================== معالج أزرار الأدمن ====================
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
-    
+
     if user_id == ADMIN_ID:
         if data == "broadcast":
             await query.message.reply_text(f"{DECOR_BROADCAST} أرسل الرسالة للإذاعة:")
             context.user_data["mode"] = "broadcast"
             return
+
         elif data == "stats":
             try:
                 with open(USERS_FILE, "r", encoding="utf-8") as f:
                     users = json.load(f)
-            except:
+            except Exception:
                 users = []
             sessions = [f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')]
-            text = f"{DECOR_TITLE.format('إحصائيات')}\n\n{DECOR_STATS} المستخدمين: {len(users)}\n{DECOR_SESSIONS} الجلسات: {len(sessions)}\n{DECOR_SUCCESS} النشطة: {len(active_userbots)}"
+            max_s = config.get("MAX_SESSIONS", 50)
+            text = (f"{DECOR_TITLE.format('إحصائيات')}\n\n"
+                    f"{DECOR_STATS} المستخدمين: {len(users)}\n"
+                    f"{DECOR_SESSIONS} الجلسات: {len(sessions)}/{max_s}\n"
+                    f"{DECOR_SUCCESS} النشطة: {len(active_userbots)}")
             await query.message.reply_text(text)
             return
+
         elif data == "force_manage":
             keyboard = [
                 [InlineKeyboardButton(f"{DECOR_SUBSCRIPTION} إضافة", callback_data="force_add")],
@@ -1102,54 +1140,92 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             ]
             await query.message.reply_text("إدارة الاشتراك الإجباري:", reply_markup=InlineKeyboardMarkup(keyboard))
             return
+
         elif data == "sessions":
             sessions = [f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')]
+            max_s = config.get("MAX_SESSIONS", 50)
             if not sessions:
                 await query.message.reply_text(f"{DECOR_SESSIONS} لا توجد جلسات")
             else:
-                text = f"{DECOR_TITLE.format('الجلسات')}\n\n"
+                text = f"{DECOR_TITLE.format('الجلسات')}\n\nالإجمالي: {len(sessions)}/{max_s}\n\n"
                 for i, s in enumerate(sessions, 1):
                     phone = s.replace('.session', '')
                     status = f"{DECOR_SUCCESS} نشط" if phone in active_userbots else f"{DECOR_CANCEL} متوقف"
                     text += f"{i}. {phone} - {status}\n"
                 await query.message.reply_text(text)
             return
-        # ✅ زر التفعيل/التعطيل يعكس الحالة ويحدث لوحة الأدمن
+
+        elif data == "set_max_sessions":
+            admin_actions[user_id] = "set_max_sessions"
+            current = config.get("MAX_SESSIONS", 50)
+            await query.message.reply_text(
+                f"⚙️ الحد الأقصى الحالي: {current} جلسة\n\nأرسل العدد الجديد:"
+            )
+            return
+
         elif data == "toggle_bot":
             config["BOT_ENABLED"] = not config.get("BOT_ENABLED", True)
             save_config(config)
-            
-            # تحديث لوحة الأدمن
-            img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
             bot_enabled = config["BOT_ENABLED"]
+            max_sessions = config.get("MAX_SESSIONS", 50)
+            current_sessions = len([f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')])
             bot_status = f"مفعّل {DECOR_SUCCESS}" if bot_enabled else f"معطل {DECOR_CANCEL}"
-            caption = f"{DECOR_TITLE.format('لوحة تحكم المطور')}\n\n{DECOR_SUCCESS} حالة البوت: {bot_status}\n{DECOR_STATS} اليوزربوتات النشطة: {len(active_userbots)}"
-            
+            caption = (f"{DECOR_TITLE.format('لوحة تحكم المطور')}\n\n"
+                       f"{DECOR_SUCCESS} حالة البوت: {bot_status}\n"
+                       f"{DECOR_STATS} اليوزربوتات النشطة: {len(active_userbots)}\n"
+                       f"{DECOR_SESSIONS} الجلسات: {current_sessions}/{max_sessions}")
             toggle_text = f"{DECOR_CANCEL} تعطيل البوت" if bot_enabled else f"{DECOR_SUCCESS} تفعيل البوت"
-            
             keyboard = [
                 [InlineKeyboardButton(f"{DECOR_BROADCAST} إذاعة", callback_data="broadcast")],
                 [InlineKeyboardButton(f"{DECOR_STATS} إحصائيات", callback_data="stats")],
                 [InlineKeyboardButton(f"{DECOR_SUBSCRIPTION} إدارة الاشتراك", callback_data="force_manage")],
                 [InlineKeyboardButton(f"{DECOR_SESSIONS} الجلسات", callback_data="sessions")],
                 [InlineKeyboardButton(f"{DECOR_SUCCESS} إنشاء جلسة", callback_data="create_session")],
+                [InlineKeyboardButton(f"⚙️ الحد الأقصى للجلسات: {max_sessions}", callback_data="set_max_sessions")],
                 [InlineKeyboardButton(toggle_text, callback_data="toggle_bot")],
                 [InlineKeyboardButton(f"{DECOR_DELETE} حذف جلسة", callback_data="delete_session")]
             ]
-            
-            await edit_admin_message(context, user_id, caption, reply_markup=InlineKeyboardMarkup(keyboard), photo=img)
-            
+            img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
+            await edit_admin_message(context, user_id, caption,
+                                     reply_markup=InlineKeyboardMarkup(keyboard), photo=img)
             status_msg = f"مفعّل {DECOR_SUCCESS}" if bot_enabled else f"معطل {DECOR_CANCEL}"
             await query.answer(f"حالة البوت: {status_msg}", show_alert=True)
             return
+
         elif data == "delete_session":
             sessions = [f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')]
             if not sessions:
                 await query.answer("لا توجد جلسات", show_alert=True)
                 return
-            keyboard = [[InlineKeyboardButton(f"{DECOR_DELETE} {s}", callback_data=f"del_sess|{s}")] for s in sessions]
-            await query.message.reply_text("اختر جلسة للحذف:", reply_markup=InlineKeyboardMarkup(keyboard))
+            # ✅ إضافة تأكيد قبل الحذف
+            keyboard = []
+            for s in sessions:
+                phone = s.replace('.session', '')
+                status = "🟢" if phone in active_userbots else "🔴"
+                keyboard.append([InlineKeyboardButton(
+                    f"{status} {phone} - اضغط للحذف",
+                    callback_data=f"confirm_del|{s}"
+                )])
+            await query.message.reply_text(
+                "⚠️ اختر جلسة للحذف (ستطلب منك تأكيد):",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
             return
+
+        elif data.startswith("confirm_del|"):
+            # ✅ جديد: طلب تأكيد قبل الحذف
+            session_file = data.split("|")[1]
+            phone = session_file.replace('.session', '')
+            keyboard = [[
+                InlineKeyboardButton(f"✅ نعم، احذف {phone}", callback_data=f"del_sess|{session_file}"),
+                InlineKeyboardButton("❌ إلغاء", callback_data="delete_session")
+            ]]
+            await query.message.reply_text(
+                f"⚠️ متأكد إنك عايز تحذف جلسة:\n{phone}؟",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
         elif data.startswith("del_sess|"):
             session_file = data.split("|")[1]
             phone = session_file.replace('.session', '')
@@ -1165,9 +1241,10 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 if os.path.exists(json_file):
                     os.remove(json_file)
                 await query.answer(f"{DECOR_CHECK} تم الحذف", show_alert=True)
-            except Exception as e:
+            except Exception:
                 await query.answer(f"{DECOR_ERROR} فشل الحذف", show_alert=True)
             return
+
         elif data == "force_add":
             admin_actions[user_id] = "force_add"
             await query.message.reply_text("أرسل معرف القناة:")
@@ -1208,10 +1285,10 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     os.remove(json_file)
                 await query.answer(f"{DECOR_CHECK} تم الحذف", show_alert=True)
                 await query.message.delete()
-            except Exception as e:
+            except Exception:
                 await query.answer(f"{DECOR_ERROR} فشل", show_alert=True)
             return
-    
+
     if data == "force_joincheck":
         if await check_force_sub(user_id, context.bot):
             await query.message.reply_text(f"{DECOR_CHECK} تم التحقق!")
@@ -1222,11 +1299,10 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 # ==================== البرنامج الرئيسي ====================
 async def main():
     logging.info("🚀 بدء تشغيل البوت...")
-    
     await restart_userbots()
-    
+
     app = ApplicationBuilder().token(MAIN_BOT_TOKEN).build()
-    
+
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -1234,28 +1310,27 @@ async def main():
             CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
         ],
         states={
-            API_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_id)],
-            API_HASH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_hash)],
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
-            CODE_DIGITS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_code_digits)],
-            PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)],
-            BOT_TOKEN_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bot_token)],
+            API_ID_STATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_id)],
+            API_HASH_STATE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_hash)],
+            PHONE_STATE:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
+            CODE_STATE:       [MessageHandler(filters.TEXT & ~filters.COMMAND, get_code)],       # ✅ كود واحد
+            PASSWORD_STATE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)],
+            BOT_TOKEN_STATE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bot_token)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
     )
-    
+
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_button_handler))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, message_handler))
-    
+
     logging.info("✅ البوت جاهز للعمل!")
-    
+
     async with app:
         await app.initialize()
         await app.start()
         await app.updater.start_polling()
-        
         stop_signal = asyncio.Event()
         try:
             await stop_signal.wait()
@@ -1273,3 +1348,4 @@ if __name__ == "__main__":
         logging.info("✅ تم إيقاف البوت بنجاح")
     except Exception as e:
         logging.error(f"❌ خطأ فادح: {e}")
+        raise
