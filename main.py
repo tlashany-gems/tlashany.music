@@ -164,10 +164,23 @@ def get_user_store(user_id: int) -> dict:
 def clear_user_store(user_id: int):
     """امسح بيانات مستخدم معين"""
     if user_id in users_sessions_data:
-        # قفل الكلاينت قبل المسح
+        # قفل الكلاينت - بس من غير create_task لأننا في sync context
         store = users_sessions_data[user_id]
-        if 'client' in store and store['client'].is_connected():
-            asyncio.create_task(store['client'].disconnect())
+        if 'client' in store:
+            try:
+                client = store['client']
+                if client.is_connected():
+                    # نستخدم loop مباشرة لو موجودة
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            loop.create_task(client.disconnect())
+                        else:
+                            loop.run_until_complete(client.disconnect())
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         del users_sessions_data[user_id]
 
 async def check_force_sub(user_id: int, bot: Bot) -> bool:

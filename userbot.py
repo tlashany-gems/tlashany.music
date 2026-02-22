@@ -1532,22 +1532,28 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
 
     print("⚡ البوت جاهز ويعمل بكامل الميزات!")
     
-    # حلقة إعادة الاتصال التلقائي
+    # حلقة إعادة الاتصال التلقائي - بدون run_until_disconnected لتجنب تعارض asyncio.shield في Python 3.13
     while keep_alive:
         try:
-            await client.run_until_disconnected()
-        except Exception as e:
-            logging.error(f"خطأ في الاتصال: {str(e)}")
-            if keep_alive:
+            if not client.is_connected():
                 print("🔄 إعادة الاتصال خلال 5 ثواني...")
                 await asyncio.sleep(5)
                 try:
                     await client.connect()
-                    print("✅ تم إعادة الاتصال بنجاح!")
+                    if await client.is_user_authorized():
+                        print("✅ تم إعادة الاتصال بنجاح!")
+                    else:
+                        logging.error("❌ الجلسة غير مصرح بها بعد إعادة الاتصال")
+                        break
                 except Exception as reconnect_error:
                     logging.error(f"فشل إعادة الاتصال: {str(reconnect_error)}")
                     await asyncio.sleep(10)
             else:
-                break
+                await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"خطأ في حلقة الاتصال: {str(e)}")
+            await asyncio.sleep(10)
     
     print("🛑 تم إيقاف البوت")
