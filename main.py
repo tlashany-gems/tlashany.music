@@ -662,9 +662,14 @@ async def create_session_callback(update: Update, context: ContextTypes.DEFAULT_
     if user_id != ADMIN_ID:
         return ConversationHandler.END
 
-    # ✅ التعديل: الأدمن يعمل جلسات بلا حد أقصى
     clear_user_store(user_id)
-    await send_clean(context, user_id, f"{DECOR_TOKEN} أدخل API_ID:\n\n📌 من: my.telegram.org")
+    context.user_data.clear()
+    
+    # ✅ نبعت رسالة جديدة مباشرة على الشات
+    msg = await query.message.reply_text(
+        f"{DECOR_TOKEN} أدخل API_ID:\n\n📌 من: my.telegram.org"
+    )
+    context.user_data["last_message_id"] = msg.message_id
     return API_ID_STATE
 
 async def get_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1346,26 +1351,38 @@ async def main():
         states={
             API_ID_STATE:     [
                 CommandHandler("start", start),
+                CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
+                CallbackQueryHandler(start_now_callback, pattern="^start_now$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_id)
             ],
             API_HASH_STATE:   [
                 CommandHandler("start", start),
+                CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
+                CallbackQueryHandler(start_now_callback, pattern="^start_now$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_hash)
             ],
             PHONE_STATE:      [
                 CommandHandler("start", start),
+                CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
+                CallbackQueryHandler(start_now_callback, pattern="^start_now$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)
             ],
             CODE_STATE:       [
                 CommandHandler("start", start),
+                CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
+                CallbackQueryHandler(start_now_callback, pattern="^start_now$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_code)
             ],
             PASSWORD_STATE:   [
                 CommandHandler("start", start),
+                CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
+                CallbackQueryHandler(start_now_callback, pattern="^start_now$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)
             ],
             BOT_TOKEN_STATE:  [
                 CommandHandler("start", start),
+                CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
+                CallbackQueryHandler(start_now_callback, pattern="^start_now$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_bot_token)
             ],
         },
