@@ -508,7 +508,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
     clear_user_store(user_id)
-    context.user_data.clear()  # ✅ مسح كل الـ state القديم عشان /start يشتغل نضيف
+    context.user_data.clear()  # ✅ مسح كل الـ state القديم
+
+    # ✅ حذف رسالة /start اللي المستخدم بعتها
+    if update.message:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
 
     if user_id == ADMIN_ID:
         img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
@@ -979,6 +986,8 @@ async def finalize_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         context.user_data["last_message_id"] = msg.message_id
+        # ✅ نضف الـ store بعد التنصيب الناجح عشان /start يشتغل تاني
+        clear_user_store(user_id)
         return ConversationHandler.END
 
     except Exception as e:
@@ -989,6 +998,7 @@ async def finalize_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"{DECOR_ERROR} خطأ أثناء الإعداد: {str(e)}\n\nحاول مرة أخرى بإرسال /start"
         )
         context.user_data["last_message_id"] = msg.message_id
+        clear_user_store(user_id)
         return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1111,12 +1121,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_subscription_prompt(context.bot, user_id, context)
         return
 
-    # ✅ الإصلاح: بعت الترحيب بس لو المستخدم مش في محادثة نشطة
-    store = get_user_store(user_id)
-    if store:  # لو عنده بيانات يعني في محادثة نشطة
-        return
-
-    await send_welcome_message(update, context)
+    # ✅ message_handler مش بيبعت ترحيب خالص - الترحيب بس من /start
+    return
 
 # ==================== معالج أزرار الأدمن ====================
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1137,13 +1143,29 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     users = json.load(f)
             except Exception:
                 users = []
-            sessions = [f for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')]
+            # ✅ إحصائيات حقيقية من الملفات الفعلية
+            all_sessions = [f.replace('.session','') for f in os.listdir(SESSIONS_DIR) if f.endswith('.session')]
             max_s = config.get("MAX_SESSIONS", 50)
-            text = (f"{DECOR_TITLE.format('إحصائيات')}\n\n"
-                    f"{DECOR_STATS} المستخدمين: {len(users)}\n"
-                    f"{DECOR_SESSIONS} الجلسات: {len(sessions)}/{max_s}\n"
-                    f"{DECOR_SUCCESS} النشطة: {len(active_userbots)}")
-            await query.message.reply_text(text)
+            active = list(active_userbots.keys())
+            stopped = [s for s in all_sessions if s not in active]
+
+            lines = [f"{DECOR_TITLE.format('إحصائيات')}"]
+            lines.append(f"")
+            lines.append(f"{DECOR_STATS} المستخدمين: {len(users)}")
+            lines.append(f"{DECOR_SESSIONS} الجلسات الكلية: {len(all_sessions)}/{max_s}")
+            lines.append(f"🟢 النشطة: {len(active)}")
+            lines.append(f"🔴 المتوقفة: {len(stopped)}")
+            if active:
+                lines.append(f"")
+                lines.append(f"📋 الجلسات النشطة:")
+                for i, phone in enumerate(active, 1):
+                    lines.append(f"  {i}. +{phone}")
+            if stopped:
+                lines.append(f"")
+                lines.append(f"📋 الجلسات المتوقفة:")
+                for i, phone in enumerate(stopped, 1):
+                    lines.append(f"  {i}. +{phone}")
+            await query.message.reply_text("\n".join(lines))
             return
 
         elif data == "force_manage":
