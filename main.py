@@ -835,9 +835,7 @@ async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_previous_message(context, user_id)
         msg = await context.bot.send_message(
             chat_id=user_id,
-            text=f"{DECOR_CODE} {filled}{empty} ({current}/5)
-
-أدخل الرقم التالي:"
+            text=f"{DECOR_CODE} {filled}{empty} ({current}/5)\n\nأدخل الرقم التالي:"
         )
         context.user_data["last_message_id"] = msg.message_id
         return CODE_STATE
