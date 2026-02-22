@@ -45,8 +45,20 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
     logging.debug(f"تيلثون شغال على الحساب: {user_data_store['phone']}")
     print(f"✅ تيلثون شغال على: {user_data_store['phone']}")
 
-    me = await client.get_me()
+    # تأكد إن الكلاينت متصل
+    try:
+        if not client.is_connected():
+            await client.connect()
+        me = await client.get_me()
+        if not me:
+            print(f"❌ فشل get_me - الجلسة غير صالحة")
+            return
+    except Exception as e:
+        print(f"❌ فشل بدء اليوزربوت: {e}")
+        return
+
     owner_id = me.id
+    print(f"✅ حساب اليوزربوت: {me.first_name} | ID: {owner_id}")
 
     # حالة البوت
     bot_enabled = True
@@ -289,9 +301,23 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
     target_chat_entity = None
     if target_chat:
         try:
-            target_chat_entity = await client.get_entity(target_chat)
+            # انتظر شوية عشان Telethon يكمل الـ connection
+            await asyncio.sleep(2)
+            target_chat_entity = await client.get_entity(int(target_chat))
+            print(f"✅ تم ربط مجموعة التخزين: {target_chat_entity.title}")
         except Exception as e:
-            logging.error(f"❌ فشل جلب المجموعة: {e}")
+            print(f"⚠️ فشل جلب المجموعة بـ get_entity، جاري المحاولة بطريقة تانية: {e}")
+            try:
+                # جرب تجيب الـ dialogs وتلاقيها فيها
+                async for dialog in client.iter_dialogs():
+                    if dialog.id == int(str(target_chat).replace('-100', '')):
+                        target_chat_entity = dialog.entity
+                        print(f"✅ تم ربط مجموعة التخزين من dialogs: {target_chat_entity.title}")
+                        break
+            except Exception as e2:
+                print(f"❌ فشل ربط مجموعة التخزين نهائياً: {e2}")
+                # نكمل بدون inbox - مش نوقف اليوزربوت
+                target_chat_entity = None
 
     async def forward_to_inbox(event, source_type):
         try:
