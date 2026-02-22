@@ -297,27 +297,8 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
         btn = KeyboardButtonUrl(text=f"💬 فتح محادثة مع {fname}", url=url)
         return ReplyInlineMarkup(rows=[KeyboardButtonRow(buttons=[btn])])
 
-    # نحل الـ target_chat entity مرة واحدة وندخره
+    # مجموعة التخزين - يربطها المستخدم بأمر .تخزين
     target_chat_entity = None
-    if target_chat:
-        try:
-            # انتظر شوية عشان Telethon يكمل الـ connection
-            await asyncio.sleep(2)
-            target_chat_entity = await client.get_entity(int(target_chat))
-            print(f"✅ تم ربط مجموعة التخزين: {target_chat_entity.title}")
-        except Exception as e:
-            print(f"⚠️ فشل جلب المجموعة بـ get_entity، جاري المحاولة بطريقة تانية: {e}")
-            try:
-                # جرب تجيب الـ dialogs وتلاقيها فيها
-                async for dialog in client.iter_dialogs():
-                    if dialog.id == int(str(target_chat).replace('-100', '')):
-                        target_chat_entity = dialog.entity
-                        print(f"✅ تم ربط مجموعة التخزين من dialogs: {target_chat_entity.title}")
-                        break
-            except Exception as e2:
-                print(f"❌ فشل ربط مجموعة التخزين نهائياً: {e2}")
-                # نكمل بدون inbox - مش نوقف اليوزربوت
-                target_chat_entity = None
 
     async def forward_to_inbox(event, source_type):
         try:
@@ -349,7 +330,7 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
 
     @client.on(events.NewMessage)
     async def handle_commands(event):
-        nonlocal welcome_enabled, welcome_image_path, welcome_text_template, bot_enabled, keep_alive
+        nonlocal welcome_enabled, welcome_image_path, welcome_text_template, bot_enabled, keep_alive, target_chat_entity
         text = event.raw_text
         chat_id = event.chat_id
         sender_id = event.sender_id
@@ -405,6 +386,55 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
                 await asyncio.sleep(1)
                 keep_alive = False
                 await client.disconnect()
+                return
+
+            # ════ أمر التخزين - ربط مجموعة الـ inbox ════
+            elif text.startswith(".تخزين"):
+                parts = text.split(maxsplit=1)
+                if len(parts) < 2:
+                    await reply_or_edit(event,
+                        "📦 **أمر التخزين**\n\n"
+                        "الاستخدام:\n"
+                        "`.تخزين <لينك أو ID المجموعة>`\n\n"
+                        "مثال:\n"
+                        "`.تخزين https://t.me/mygroup`\n"
+                        "`.تخزين -1001234567890`\n\n"
+                        f"الحالة الحالية: {'✅ مربوط بـ ' + target_chat_entity.title if target_chat_entity else '❌ غير مربوط'}"
+                    )
+                    return
+                input_val = parts[1].strip()
+                try:
+                    await reply_or_edit(event, "⏳ جاري ربط المجموعة...")
+                    entity = await client.get_entity(input_val)
+                    target_chat_entity = entity
+                    await reply_or_edit(event,
+                        f"✅ **تم ربط مجموعة التخزين بنجاح!**\n\n"
+                        f"📦 المجموعة: **{entity.title}**\n"
+                        f"🆔 ID: `{entity.id}`\n\n"
+                        f"الآن كل رسالة خاصة أو منشن أو رد هيتنسخ فيها تلقائياً 📥"
+                    )
+                except Exception as e:
+                    await reply_or_edit(event,
+                        f"❌ فشل ربط المجموعة!\n\n"
+                        f"تأكد إنك:\n"
+                        f"• عضو في المجموعة\n"
+                        f"• اللينك أو الـ ID صح\n\n"
+                        f"الخطأ: {str(e)}"
+                    )
+                return
+
+            elif text == ".حالة_التخزين":
+                if target_chat_entity:
+                    await reply_or_edit(event,
+                        f"📦 **مجموعة التخزين:**\n\n"
+                        f"✅ مربوط بـ: **{target_chat_entity.title}**\n"
+                        f"🆔 ID: `{target_chat_entity.id}`"
+                    )
+                else:
+                    await reply_or_edit(event,
+                        "❌ **مجموعة التخزين غير مربوطة**\n\n"
+                        "استخدم: `.تخزين <لينك أو ID>`"
+                    )
                 return
 
 
@@ -520,6 +550,8 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
 `.تعطيل_البوت` - إيقاف البوت مؤقتاً
 `.حالة_البوت` - معرفة حالة البوت
 `.ايقاف` - إيقاف البوت نهائياً
+`.تخزين <لينك/ID>` - ربط مجموعة التخزين
+`.حالة_التخزين` - عرض مجموعة التخزين الحالية
 
 ═════════════════════
 

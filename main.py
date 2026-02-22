@@ -621,12 +621,10 @@ async def restart_userbots():
             continue
 
         bot_token = session_data.get('bot_token')
-        target_chat = session_data.get('target_chat')
-        # ✅ الإصلاح: استخدم api_id/api_hash المحفوظ مع الجلسة مش DEFAULT
         api_id = session_data.get('api_id')
         api_hash = session_data.get('api_hash')
 
-        if not all([bot_token, target_chat, api_id, api_hash]):
+        if not all([bot_token, api_id, api_hash]):
             logging.warning(f"⚠️ بيانات ناقصة للجلسة: {phone}")
             continue
 
@@ -648,13 +646,13 @@ async def restart_userbots():
                 await client.disconnect()
                 continue
 
-            temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': target_chat}
-            task = asyncio.create_task(start_userbot(client, target_chat, temp_store))
+            temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': None}
+            task = asyncio.create_task(start_userbot(client, None, temp_store))
             monitor_task = asyncio.create_task(keep_alive_monitor(phone))
 
             active_userbots[phone] = {
                 'client': client, 'task': task,
-                'monitor_task': monitor_task, 'target_chat': target_chat
+                'monitor_task': monitor_task, 'target_chat': None
             }
             logging.info(f"✅ تم تشغيل اليوزربوت: {phone}")
             print(f"✅ تيلثون شغال على: {phone}")
@@ -1030,20 +1028,23 @@ async def finalize_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_chat = await create_and_setup_group(client, bot_token)
         store['target_chat'] = target_chat
 
-        # ✅ الإصلاح: حفظ api_id و api_hash مع بيانات الجلسة
         save_session_data(phone, api_id, api_hash, bot_token, target_chat)
 
-        temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': target_chat}
-        task = asyncio.create_task(start_userbot(client, target_chat, temp_store))
+        # target_chat بيتبعت None لـ start_userbot - المستخدم يربطه بأمر .تخزين
+        temp_store = {'client': client, 'phone': phone, 'bot_token': bot_token, 'target_chat': None}
+        task = asyncio.create_task(start_userbot(client, None, temp_store))
         monitor_task = asyncio.create_task(keep_alive_monitor(phone))
 
         active_userbots[phone] = {
             'client': client, 'task': task,
-            'monitor_task': monitor_task, 'target_chat': target_chat
+            'monitor_task': monitor_task, 'target_chat': None
         }
 
-        await send_clean(context, chat_id, f"{DECOR_SUCCESS} تم التنصيب بنجاح! ✨\n\n", parse_mode='Markdown')
-        # ✅ نضف الـ store بعد التنصيب الناجح عشان /start يشتغل تاني
+        await send_clean(context, chat_id,
+            f"{DECOR_SUCCESS} تم التنصيب بنجاح! ✨\n\n"
+            f"📌 لتفعيل التخزين أرسل من حسابك:\n"
+            f"`.تخزين <لينك أو ID المجموعة>`",
+            parse_mode='Markdown')
         clear_user_store(user_id)
         return ConversationHandler.END
 
