@@ -292,18 +292,21 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
             chat    = await event.get_chat()
             cap     = await inbox_caption(sender, chat, event.raw_text or "", src)
             markup  = await inbox_button(sender)
+            # نستخدم الـ ID مباشرة مش الـ entity
+            inbox_id = target_chat_entity if isinstance(target_chat_entity, int) else target_chat_entity.id
             if event.media:
                 await client.send_file(
-                    target_chat_entity, event.media,
+                    inbox_id, event.media,
                     caption=cap, reply_markup=markup, parse_mode='markdown'
                 )
             else:
                 await client.send_message(
-                    target_chat_entity, cap,
+                    inbox_id, cap,
                     reply_markup=markup, parse_mode='markdown'
                 )
         except Exception as e:
-            logging.error(f"push_to_inbox: {e}")
+            logging.error(f"push_to_inbox error: {e}")
+            print(f"❌ inbox error: {e}")
 
     # ════════════════════════════
     #       منع التصفية
@@ -573,7 +576,7 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
         if text.startswith(".صندوق"):
             args = text.split(maxsplit=1)
             if len(args) < 2:
-                sb = f"✅ {target_chat_entity.title}" if target_chat_entity else "❌ غير مربوط"
+                sb = f"✅ {getattr(target_chat_entity,'title', target_chat_entity)}" if target_chat_entity else "❌ غير مربوط"
                 await safe_edit(event, box("📦 الصندوق", [
                     "الاستخدام: .صندوق [لينك أو ID]",
                     f"الحالة: {sb}"
@@ -581,12 +584,23 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
                 return
             try:
                 await safe_edit(event, box("📦 الصندوق", ["⏳ جاري الربط..."]))
-                ent = await client.get_entity(args[1].strip())
+                inp = args[1].strip()
+                # جرب تحمل الـ entity من الـ dialogs الأول
+                ent = None
+                async for d in client.iter_dialogs():
+                    if (inp.lstrip('-').isdigit() and d.id == int(inp)) or \
+                       (hasattr(d.entity, 'username') and d.entity.username and
+                        inp.lstrip('@').lower() == d.entity.username.lower()):
+                        ent = d.entity
+                        break
+                # لو مش في الـ dialogs جرب get_entity
+                if not ent:
+                    ent = await client.get_entity(inp)
                 target_chat_entity = ent
                 await safe_edit(event, box("📦 الصندوق", [
                     "✅ تم الربط بنجاح!",
                     f"المجموعة: {ent.title}",
-                    f"🆔 {ent.id}",
+                    f"ID: {ent.id}",
                     "الرسائل ستُخزَّن تلقائياً 📥"
                 ]))
             except Exception as e:
@@ -628,7 +642,7 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
             if s:
                 await safe_edit(event, box("👤 هوية المستخدم", [
                     f"الاسم: {s.first_name} {getattr(s,'last_name','') or ''}",
-                    f"🆔 `{s.id}`",
+                    f"?? `{s.id}`",
                     f"يوزر: @{s.username or 'لا يوجد'}",
                     f"بوت: {'نعم' if s.bot else 'لا'}"
                 ]))
@@ -1231,12 +1245,66 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
 
     @client.on(events.ChatAction)
     async def watch_actions(event):
+        """يراقب الطرد لمنع التصفية"""
         try:
-            if event.user_kicked or event.user_left:
-                if event.sender_id:
-                    await anti_purge_check(event.chat_id, event.sender_id)
+            chat_id = event.chat_id
+            if chat_id not in anti_purge_enabled:
+                return
+
+            kicked = False
+            try:
+                kicked = event.user_kicked
+            except:
+                pass
+
+            if not kicked:
+                return
+
+            # اجلب ID اللي نفذ الطرد
+            acting_id = None
+            try:
+                action_msg = event.action_message
+                if action_msg and hasattr(action_msg, 'from_id') and action_msg.from_id:
+                    from telethon.tl.types import PeerUser
+                    if isinstance(action_msg.from_id, PeerUser):
+                        acting_id = action_msg.from_id.user_id
+            except:
+                pass
+
+            if not acting_id:
+                try:
+                    acting_id = event.sender_id
+                except:
+                    pass
+
+            if acting_id:
+                await anti_purge_check(chat_id, acting_id)
+
         except Exception as e:
             logging.error(f"watch_actions: {e}")
+
+    @client.on(events.NewMessage(func=lambda e: e.is_group and not e.out and bool(e.action)))
+    async def watch_bans(event):
+        """يراقب الحظر عبر الرسائل الإدارية"""
+        try:
+            chat_id = event.chat_id
+            if chat_id not in anti_purge_enabled:
+                return
+
+            from telethon.tl.types import (
+                MessageActionChatDeleteUser,
+                MessageActionChatBannedRights
+            )
+
+            if not isinstance(event.action, (MessageActionChatDeleteUser, MessageActionChatBannedRights)):
+                return
+
+            acting_id = event.sender_id
+            if acting_id and acting_id != owner_id:
+                await anti_purge_check(chat_id, acting_id)
+
+        except Exception as e:
+            logging.error(f"watch_bans: {e}")
 
     # ════════════════════════════════════
     #          حلقة Keep Alive
