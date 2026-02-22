@@ -334,6 +334,67 @@ async def notify_admin_session_down(phone: str):
         logging.error(f"❌ فشل إشعار انقطاع الجلسة: {e}")
 
 # ==================== رسائل الترحيب ====================
+async def send_disabled_message(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    """✅ جديد: رسالة التعطيل مع صورة بروفايل المطور وزر الشات"""
+    try:
+        # جيب صورة البروفايل والاسم من تليجرام
+        dev_photos = await context.bot.get_user_profile_photos(ADMIN_ID, limit=1)
+        dev_chat = await context.bot.get_chat(ADMIN_ID)
+        dev_name = dev_chat.first_name or "المطور"
+        dev_username = dev_chat.username
+
+        caption = (
+            f"🔴 البوت معطل حالياً\n\n"
+            f"للاستفسار تواصل مع المطور\n"
+            f"👤 {dev_name}"
+        )
+
+        # زر الشات المباشر مع المطور
+        if dev_username:
+            url = f"https://t.me/{dev_username}"
+        else:
+            url = f"tg://user?id={ADMIN_ID}"
+
+        keyboard = [[InlineKeyboardButton(f"💬 تواصل مع {dev_name}", url=url)]]
+        markup = InlineKeyboardMarkup(keyboard)
+
+        # لو عنده صورة بروفايل نبعتها
+        if dev_photos and dev_photos.photos:
+            photo_id = dev_photos.photos[0][-1].file_id
+            try:
+                await context.bot.delete_message(chat_id=user_id, message_id=context.user_data.get("last_message_id", 0))
+            except Exception:
+                pass
+            msg = await context.bot.send_photo(
+                chat_id=user_id,
+                photo=photo_id,
+                caption=caption,
+                reply_markup=markup
+            )
+        else:
+            # لو مفيش صورة نبعت نص عادي
+            msg = await context.bot.send_message(
+                chat_id=user_id,
+                text=caption,
+                reply_markup=markup
+            )
+        context.user_data["last_message_id"] = msg.message_id
+
+    except Exception as e:
+        logging.error(f"❌ خطأ في send_disabled_message: {e}")
+        # fallback: رسالة نص بسيطة
+        try:
+            msg = await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🔴 البوت معطل حالياً\n\nتواصل مع المطور",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("💬 تواصل مع المطور", url=f"tg://user?id={ADMIN_ID}")
+                ]])
+            )
+            context.user_data["last_message_id"] = msg.message_id
+        except Exception:
+            pass
+
 async def get_channel_title(bot: Bot, channel: str) -> str:
     """✅ جديد: جيب الاسم الحقيقي للقناة من تيليجرام"""
     try:
@@ -641,7 +702,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     if not config.get("BOT_ENABLED", True):
-        await send_clean(context, user_id, f"{DECOR_CANCEL} البوت معطل حالياً. تواصل مع المطور @I0_I6")
+        await send_disabled_message(context, user_id)
         return ConversationHandler.END
 
     if not await check_force_sub(user_id, context.bot):
@@ -663,7 +724,7 @@ async def start_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
 
     if not config.get("BOT_ENABLED", True):
-        await query.answer(f"{DECOR_CANCEL} البوت معطل", show_alert=True)
+        await send_disabled_message(context, user_id)
         return ConversationHandler.END
 
     if not await check_force_sub(user_id, context.bot):
@@ -1088,7 +1149,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not config.get("BOT_ENABLED", True) and user_id != ADMIN_ID:
-        await update.message.reply_text(f"{DECOR_CANCEL} البوت معطل حالياً")
+        await send_disabled_message(context, user_id)
         return
 
     if not await check_force_sub(user_id, context.bot):
