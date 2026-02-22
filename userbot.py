@@ -285,9 +285,18 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
         btn = KeyboardButtonUrl(text=f"💬 فتح محادثة مع {fname}", url=url)
         return ReplyInlineMarkup(rows=[KeyboardButtonRow(buttons=[btn])])
 
+    # نحل الـ target_chat entity مرة واحدة وندخره
+    target_chat_entity = None
+    if target_chat:
+        try:
+            target_chat_entity = await client.get_entity(target_chat)
+        except Exception as e:
+            logging.error(f"❌ فشل جلب المجموعة: {e}")
+
     async def forward_to_inbox(event, source_type):
         try:
-            if not target_chat:
+            if not target_chat_entity:
+                logging.warning("⚠️ target_chat_entity مش موجود - الرسالة مش اتبعتت")
                 return
             sender = await event.get_sender()
             chat   = await event.get_chat()
@@ -296,14 +305,14 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
             reply_markup = await get_inbox_button(sender)
             if event.media:
                 await client.send_file(
-                    target_chat, event.media,
+                    target_chat_entity, event.media,
                     caption=caption,
                     reply_markup=reply_markup,
                     parse_mode='markdown'
                 )
             else:
                 await client.send_message(
-                    target_chat, caption,
+                    target_chat_entity, caption,
                     reply_markup=reply_markup,
                     parse_mode='markdown'
                 )

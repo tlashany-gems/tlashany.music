@@ -572,7 +572,8 @@ async def create_and_setup_group(client: TelegramClient, bot_token: str):
     except Exception as e:
         logging.warning(f"⚠️ فشل إضافة/ترقية البوت: {e}")
 
-    return group_id
+    # نرجع الـ ID مع علامة سالب عشان يكون supergroup ID صح
+    return int(f"-100{group_id}")
 
 # ==================== Keep Alive ====================
 async def keep_alive_monitor(phone: str):
