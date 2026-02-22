@@ -260,13 +260,23 @@ async def notify_admin_session_down(phone: str):
         logging.error(f"❌ فشل إشعار انقطاع الجلسة: {e}")
 
 # ==================== رسائل الترحيب ====================
+async def get_channel_title(bot: Bot, channel: str) -> str:
+    """✅ جديد: جيب الاسم الحقيقي للقناة من تيليجرام"""
+    try:
+        chat = await bot.get_chat(channel)
+        return chat.title or channel
+    except Exception:
+        return channel
+
 async def send_subscription_prompt(bot: Bot, user_id: int, context: ContextTypes.DEFAULT_TYPE):
     channels = config.get("FORCE_CHANNELS", [])
     img = config.get("SUBSCRIPTION_IMAGE")
     buttons = []
     for ch in channels:
         chname = ch.strip("@")
-        buttons.append(InlineKeyboardButton(f"📣 انضم إلى {ch}", url=f"https://t.me/{chname}"))
+        # ✅ التعديل: جيب الاسم الحقيقي من تيليجرام
+        title = await get_channel_title(bot, ch)
+        buttons.append(InlineKeyboardButton(f"📣 {title}", url=f"https://t.me/{chname}"))
     buttons.append(InlineKeyboardButton(f"{DECOR_CHECK} تحقق من الاشتراك", callback_data="force_joincheck"))
 
     rows = [[b] for b in buttons]
@@ -329,73 +339,23 @@ async def check_existing_bot(client: TelegramClient) -> dict:
         return {'exists': False}
 
 async def create_bot_automatically(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """✅ التعديل: مش بيعمل بوت لوحده - بيطلب من المستخدم يعمل من BotFather"""
     user_id = update.effective_user.id if hasattr(update, 'effective_user') else update.callback_query.from_user.id
     chat_id = update.callback_query.message.chat_id if update.callback_query else user_id
-    store = get_user_store(user_id)
-    client = store['client']
 
     await delete_previous_message(context, chat_id)
-    msg = await context.bot.send_message(chat_id=chat_id, text="🔍 جاري البحث عن بوت موجود...")
-    context.user_data["last_message_id"] = msg.message_id
-
-    existing_bot = await check_existing_bot(client)
-    if existing_bot.get('exists'):
-        store['bot_token'] = existing_bot['token']
-        await delete_previous_message(context, chat_id)
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"{DECOR_CHECK} تم العثور على بوت موجود!\n\n"
-                 f"📱 البوت: @{existing_bot['username']}\n"
-                 f"{DECOR_SUCCESS} سيتم استخدام هذا البوت"
-        )
-        context.user_data["last_message_id"] = msg.message_id
-        await asyncio.sleep(1.5)
-        return await finalize_setup(update, context)
-
-    await delete_previous_message(context, chat_id)
-    msg = await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"📢 لم يتم العثور على بوت موجود\n\n🤖 سيتم إنشاء بوت جديد الآن...\n⏳ انتظر قليلاً..."
+    text = (
+        f"{DECOR_TOKEN} الخطوة الأخيرة!\n\n"
+        f"1️⃣ افتح @BotFather\n"
+        f"2️⃣ ابعت /newbot\n"
+        f"3️⃣ اكتب اسم للبوت\n"
+        f"4️⃣ اكتب يوزر للبوت (لازم ينتهي بـ bot)\n"
+        f"5️⃣ انسخ التوكن وابعته هنا\n\n"
+        f"⚡ ابعت التوكن هنا بعد ما تخلص:"
     )
+    msg = await context.bot.send_message(chat_id=chat_id, text=text)
     context.user_data["last_message_id"] = msg.message_id
-
-    try:
-        botfather = await client.get_entity('BotFather')
-        await client.send_message(botfather, '/newbot')
-        await asyncio.sleep(2)
-        bot_name = f"TALASHNY_{datetime.now().strftime('%Y%m%d%H%M')}"
-        await client.send_message(botfather, bot_name)
-        await asyncio.sleep(2)
-        bot_username = f"TALASHNY{datetime.now().strftime('%H%M%S')}bot"
-        await client.send_message(botfather, bot_username)
-        await asyncio.sleep(3)
-
-        await delete_previous_message(context, chat_id)
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"✅ تم إنشاء البوت!\n\n📱 البوت: @{bot_username}\n\n"
-                 f"الآن:\n1️⃣ افتح @BotFather\n2️⃣ انسخ التوكن (الكود الطويل)\n3️⃣ أرسله هنا {DECOR_TOKEN}"
-        )
-        context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_STATE
-
-    except FloodWaitError as e:
-        await delete_previous_message(context, chat_id)
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"⏳ فلود! انتظر {e.seconds} ثانية\n\nأو أرسل التوكن يدوياً من @BotFather {DECOR_TOKEN}"
-        )
-        context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_STATE
-    except Exception as e:
-        logging.error(f"❌ فشل إنشاء البوت: {e}")
-        await delete_previous_message(context, chat_id)
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"{DECOR_ERROR} فشل إنشاء البوت تلقائياً\n\nأرسل التوكن يدوياً من @BotFather {DECOR_TOKEN}"
-        )
-        context.user_data["last_message_id"] = msg.message_id
-        return BOT_TOKEN_STATE
+    return BOT_TOKEN_STATE
 
 async def create_and_setup_group(client: TelegramClient, bot_token: str):
     try:
@@ -548,6 +508,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
     clear_user_store(user_id)
+    context.user_data.clear()  # ✅ مسح كل الـ state القديم عشان /start يشتغل نضيف
 
     if user_id == ADMIN_ID:
         img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
@@ -613,10 +574,12 @@ async def start_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await send_subscription_prompt(context.bot, user_id, context)
         return ConversationHandler.END
 
-    can_add, current, max_s = check_session_limit()
-    if not can_add:
-        await query.answer(f"وصل الحد الأقصى ({current}/{max_s})", show_alert=True)
-        return ConversationHandler.END
+    # ✅ التعديل: الأدمن مش محدود بعدد الجلسات
+    if user_id != ADMIN_ID:
+        can_add, current, max_s = check_session_limit()
+        if not can_add:
+            await query.answer(f"وصل الحد الأقصى ({current}/{max_s})", show_alert=True)
+            return ConversationHandler.END
 
     clear_user_store(user_id)
     await delete_previous_message(context, user_id)
@@ -635,6 +598,7 @@ async def create_session_callback(update: Update, context: ContextTypes.DEFAULT_
     if user_id != ADMIN_ID:
         return ConversationHandler.END
 
+    # ✅ التعديل: الأدمن يعمل جلسات بلا حد أقصى
     clear_user_store(user_id)
     await delete_previous_message(context, user_id)
     msg = await query.message.reply_text(
@@ -1317,32 +1281,45 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.reply_text("أرسل صورة أو رابط:")
             return
         elif data.startswith("allow|"):
+            # ✅ موافقة - بس نحذف رسالة الإشعار
             await query.message.delete()
             return
         elif data.startswith("delete_session|"):
+            # ✅ التعديل: رفض الجلسة = حذف كامل من السيرفر
             session_file = data.split("|", 1)[1]
             phone = os.path.basename(session_file).replace('.session', '')
             try:
+                # وقف اليوزربوت لو شغال
                 if phone in active_userbots:
                     active_userbots[phone]['task'].cancel()
                     if 'monitor_task' in active_userbots[phone]:
                         active_userbots[phone]['monitor_task'].cancel()
                     await active_userbots[phone]['client'].disconnect()
                     del active_userbots[phone]
-                if os.path.exists(session_file):
-                    os.remove(session_file)
+                # حذف ملف الجلسة
+                session_path = os.path.join(SESSIONS_DIR, f"{phone}.session")
+                if os.path.exists(session_path):
+                    os.remove(session_path)
+                # حذف ملف البيانات
                 json_file = os.path.join(SESSIONS_DIR, f"{phone}.json")
                 if os.path.exists(json_file):
                     os.remove(json_file)
-                await query.answer(f"{DECOR_CHECK} تم الحذف", show_alert=True)
+                # حذف أي ملفات تانية مرتبطة بالجلسة
+                for ext in ['-journal', '.session-journal']:
+                    extra = os.path.join(SESSIONS_DIR, f"{phone}{ext}")
+                    if os.path.exists(extra):
+                        os.remove(extra)
+                logging.info(f"🗑️ تم رفض وحذف جلسة: {phone}")
+                await query.answer(f"{DECOR_CHECK} تم رفض وحذف الجلسة بالكامل", show_alert=True)
                 await query.message.delete()
-            except Exception:
-                await query.answer(f"{DECOR_ERROR} فشل", show_alert=True)
+            except Exception as e:
+                logging.error(f"❌ فشل حذف الجلسة: {e}")
+                await query.answer(f"{DECOR_ERROR} فشل الحذف", show_alert=True)
             return
 
     if data == "force_joincheck":
         if await check_force_sub(user_id, context.bot):
-            await query.message.reply_text(f"{DECOR_CHECK} تم التحقق!")
+            await query.answer(f"{DECOR_CHECK} تم التحقق!", show_alert=True)
             await send_welcome_message(query, context)
         else:
             await query.answer(f"{DECOR_SUBSCRIPTION} يجب الاشتراك أولاً!", show_alert=True)
@@ -1361,15 +1338,37 @@ async def main():
             CallbackQueryHandler(create_session_callback, pattern="^create_session$"),
         ],
         states={
-            API_ID_STATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_id)],
-            API_HASH_STATE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_hash)],
-            PHONE_STATE:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
-            CODE_STATE:       [MessageHandler(filters.TEXT & ~filters.COMMAND, get_code)],       # ✅ كود واحد
-            PASSWORD_STATE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)],
-            BOT_TOKEN_STATE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bot_token)],
+            API_ID_STATE:     [
+                CommandHandler("start", start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_id)
+            ],
+            API_HASH_STATE:   [
+                CommandHandler("start", start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_api_hash)
+            ],
+            PHONE_STATE:      [
+                CommandHandler("start", start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)
+            ],
+            CODE_STATE:       [
+                CommandHandler("start", start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_code)
+            ],
+            PASSWORD_STATE:   [
+                CommandHandler("start", start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)
+            ],
+            BOT_TOKEN_STATE:  [
+                CommandHandler("start", start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_bot_token)
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("start", start),   # ✅ /start يريسيت المحادثة في أي وقت
+        ],
+        allow_reentry=True,
+        conversation_timeout=600,  # ✅ لو المستخدم وقف 10 دقايق يتريسيت تلقائي
     )
 
     app.add_handler(conv_handler)
