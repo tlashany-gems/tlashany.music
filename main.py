@@ -259,6 +259,18 @@ def back_btn():
     """زر الرجوع للوحة الرئيسية"""
     return InlineKeyboardButton("🔙 رجوع", callback_data="admin_home")
 
+async def show_section(query, text: str, keyboard: list):
+    """✅ عرض قسم - بيبعت رسالة نصية جديدة أو يعدل لو الرسالة نصية"""
+    try:
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        # لو الرسالة صورة، نبعت رسالة نصية جديدة
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
 async def notify_admin_session(phone: str, user_id: int, session_file: str):
     keyboard = [[
         InlineKeyboardButton(f"{DECOR_CHECK} السماح", callback_data=f"allow|{session_file}"),
@@ -328,10 +340,25 @@ async def send_welcome_message(update, context: ContextTypes.DEFAULT_TYPE):
     buttons = [[InlineKeyboardButton(f"{DECOR_SUCCESS} ابدأ الآن", callback_data="start_now")]]
 
     await delete_previous_message(context, user_id)
-    try:
-        msg = await context.bot.send_animation(chat_id=user_id, animation=img, caption=caption,
-                                                reply_markup=InlineKeyboardMarkup(buttons))
-    except Exception:
+    sent = False
+    # جرب animation
+    if img:
+        try:
+            msg = await context.bot.send_animation(chat_id=user_id, animation=img, caption=caption,
+                                                    reply_markup=InlineKeyboardMarkup(buttons))
+            sent = True
+        except Exception:
+            pass
+    # لو فشلت جرب صورة
+    if not sent and img:
+        try:
+            msg = await context.bot.send_photo(chat_id=user_id, photo=img, caption=caption,
+                                               reply_markup=InlineKeyboardMarkup(buttons))
+            sent = True
+        except Exception:
+            pass
+    # لو فشلت ابعت نص
+    if not sent:
         msg = await context.bot.send_message(chat_id=user_id, text=caption,
                                               reply_markup=InlineKeyboardMarkup(buttons))
     context.user_data["last_message_id"] = msg.message_id
@@ -1043,9 +1070,7 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                        f"حالة البوت: {bot_status}\n"
                        f"النشطة: {len(active_userbots)} | الجلسات: {current_sessions}/{max_sessions}")
             img = config.get("STARTUP_IMAGE", STARTUP_IMAGE_URL)
-            await edit_admin_message(context, user_id, caption,
-                                     reply_markup=admin_main_keyboard(bot_enabled, max_sessions, len(active_userbots)),
-                                     photo=img)
+            await show_section(query, caption, [list(row) for row in admin_main_keyboard(bot_enabled, max_sessions, len(active_userbots)).inline_keyboard])
             return
 
         # ====== قسم الإحصائيات ======
@@ -1072,16 +1097,13 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             if stopped:
                 lines += ["", "🔴 المتوقفة:"] + [f"  {i}. +{p}" for i, p in enumerate(stopped, 1)]
             keyboard = [[back_btn()]]
-            await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard))
+            await show_section(query, "\n".join(lines), keyboard)
             return
 
         # ====== قسم الإذاعة ======
         elif data == "sec_broadcast":
             keyboard = [[back_btn()]]
-            await query.message.edit_text(
-                f"📣 الإذاعة\n\nأرسل الرسالة اللي عايز تذيعها\n(نص، صورة، فيديو، ملف):",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await show_section(query, "📣 الإذاعة\n\nأرسل الرسالة اللي عايز تذيعها\n(نص، صورة، فيديو، ملف):", keyboard)
             context.user_data["mode"] = "broadcast"
             return
 
@@ -1112,7 +1134,7 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 for i, phone in enumerate(all_sessions, 1):
                     icon = "🟢" if phone in active_userbots else "🔴"
                     lines.append(f"{icon} {i}. +{phone}")
-            await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard))
+            await show_section(query, "\n".join(lines), keyboard)
             return
 
         # ====== قسم الاشتراك ======
@@ -1130,20 +1152,14 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 ],
                 [back_btn()],
             ]
-            await query.message.edit_text(
-                f"🔒 إدارة الاشتراك الإجباري\n\nالقنوات الحالية:\n{ch_text}",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await show_section(query, f"🔒 إدارة الاشتراك الإجباري\n\nالقنوات الحالية:\n{ch_text}", keyboard)
             return
 
         elif data == "set_max_sessions":
             admin_actions[user_id] = "set_max_sessions"
             current = config.get("MAX_SESSIONS", 50)
             keyboard = [[back_btn()]]
-            await query.message.edit_text(
-                f"⚙️ الحد الأقصى الحالي: {current} جلسة\n\nأرسل العدد الجديد:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await show_section(query, f"⚙️ الحد الأقصى الحالي: {current} جلسة\n\nأرسل العدد الجديد:", keyboard)
             return
 
         # ====== broadcast (قديم للتوافق) ======
@@ -1226,27 +1242,23 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         elif data == "force_add":
             admin_actions[user_id] = "force_add"
             keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="sec_sub")]]
-            await query.message.edit_text("➕ أرسل معرف القناة:\nمثال: @channel أو https://t.me/channel",
-                                          reply_markup=InlineKeyboardMarkup(keyboard))
+            await show_section(query, "➕ أرسل معرف القناة:\nمثال: @channel أو https://t.me/channel", keyboard)
             return
         elif data == "force_remove":
             admin_actions[user_id] = "force_remove"
             keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="sec_sub")]]
-            await query.message.edit_text("➖ أرسل معرف القناة للحذف:",
-                                          reply_markup=InlineKeyboardMarkup(keyboard))
+            await show_section(query, "➖ أرسل معرف القناة للحذف:", keyboard)
             return
         elif data == "force_list":
             channels = config.get("FORCE_CHANNELS", [])
             ch_text = "\n".join([f"{i}. {ch}" for i, ch in enumerate(channels, 1)]) if channels else "لا توجد قنوات"
             keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="sec_sub")]]
-            await query.message.edit_text(f"📋 القنوات:\n\n{ch_text}",
-                                          reply_markup=InlineKeyboardMarkup(keyboard))
+            await show_section(query, f"📋 القنوات:\n\n{ch_text}", keyboard)
             return
         elif data == "force_setimg":
             admin_actions[user_id] = "force_setimg"
             keyboard = [[InlineKeyboardButton("🔙 رجوع", callback_data="sec_sub")]]
-            await query.message.edit_text("🖼 أرسل صورة أو رابط صورة:",
-                                          reply_markup=InlineKeyboardMarkup(keyboard))
+            await show_section(query, "🖼 أرسل صورة أو رابط صورة:", keyboard)
             return
         elif data.startswith("allow|"):
             # ✅ موافقة - بس نحذف رسالة الإشعار
