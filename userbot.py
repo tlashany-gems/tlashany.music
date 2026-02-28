@@ -124,7 +124,7 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
     # ══════════════════════════════════════════
     @client.on(events.NewMessage)
     async def monitor_channels(event):
-        """يراقب القنوات المحددة ويستخرج أرقام الكروت"""
+        """يراقب القنوات ويستخرج الكود + الوحدات فقط، يحذفهم بعد 5 دقايق"""
         if not tracked_channels:
             return
         chat_id = event.chat_id
@@ -132,19 +132,37 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
             return
 
         text = event.raw_text or ""
-        # استخراج أرقام الكروت بصيغة *858*XXXXXXXXXXXXXXX#
-        cards = re.findall(r'\*858\*(\d+)#', text)
-        if not cards:
+
+        # يمسك الكود في أي صيغة (نص عادي أو داخل code block)
+        codes = re.findall(r'\*858\*(\d+)#', text)
+        if not codes:
             return
 
+        # يستخرج الوحدات لو موجودة
+        units_matches = re.findall(r'(\d[\d,]*)\s*UNITS?', text, re.IGNORECASE)
+
         dest_channel = tracked_channels[chat_id]
-        for card_number in cards:
-            card_msg = f"*858*{card_number}#"
+
+        for i, code_number in enumerate(codes):
+            card_code = f"*858*{code_number}#"
+            units = units_matches[i] if i < len(units_matches) else None
+            msg = f"{card_code}\n{units} UNITS" if units else card_code
+
             try:
-                await client.send_message(dest_channel, card_msg)
-                logging.info(f"✅ أُرسل كرت: {card_msg} → {dest_channel}")
+                sent = await client.send_message(dest_channel, msg)
+                logging.info(f"✅ ارسل: {msg}")
+
+                async def delete_after(sent_msg, delay=300):
+                    await asyncio.sleep(delay)
+                    try:
+                        await sent_msg.delete()
+                    except Exception as ex:
+                        logging.error(f"فشل الحذف: {ex}")
+
+                asyncio.create_task(delete_after(sent))
+
             except Exception as e:
-                logging.error(f"❌ فشل إرسال الكرت: {e}")
+                logging.error(f"فشل ارسال الكرت: {e}")
 
     # ══════════════════════════════════════════
     #         الترحيب التلقائي في الخاص
