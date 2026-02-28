@@ -122,14 +122,17 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
     # ══════════════════════════════════════════
     #         متابعة القنوات (كروت الشحن)
     # ══════════════════════════════════════════
-    @client.on(events.NewMessage)
+    @client.on(events.NewMessage(incoming=True))
     async def monitor_channels(event):
         """يراقب القنوات ويستخرج الكود + الوحدات فقط، يحذفهم بعد 5 دقايق"""
         if not tracked_channels:
             return
-        chat_id = event.chat_id
-        if chat_id not in tracked_channels:
+        # normalize: تيليجرام بيبعت -100XXXXX أو XXXXX - نوحدهم
+        raw_id = event.chat_id
+        normalized = int(str(raw_id).replace("-100", "")) if str(raw_id).startswith("-100") else raw_id
+        if normalized not in tracked_channels and raw_id not in tracked_channels:
             return
+        chat_id = normalized if normalized in tracked_channels else raw_id
 
         text = event.raw_text or ""
 
@@ -270,7 +273,13 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
             try:
                 src = await client.get_entity(args[0].lstrip('@'))
                 dst = await client.get_entity(args[1].lstrip('@'))
-                tracked_channels[src.id] = dst.id
+                # normalize IDs عشان يتطابق مع event.chat_id
+                src_id = src.id
+                dst_id = dst.id
+                tracked_channels[src_id] = dst_id
+                # كمان نحفظ بصيغة -100 لو القناة
+                if hasattr(src, 'access_hash'):
+                    tracked_channels[int(f"-100{src_id}")] = dst_id
                 await reply_or_edit(event,
                     f"✅ بدأ التتبع!\n"
                     f"📡 المصدر: {src.title}\n"
