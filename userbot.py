@@ -149,10 +149,28 @@ async def start_userbot(client: TelegramClient, target_chat, user_data_store):
         for i, code_number in enumerate(codes):
             card_code = f"*858*{code_number}#"
             units = units_matches[i] if i < len(units_matches) else None
-            msg = f"{card_code}\n{units} UNITS" if units else card_code
+            if units:
+                msg = (
+                    f"╭────═⌁TALASHNY⌁═──⟤\n"
+                    f"│╭✦───✦──────✦─⟢\n"
+                    f"╞╡ Units ➜ وحدة {units}\n"
+                    f"│╰✦─⟐─✦────✦╮\n"
+                    f"│╭✦─⟐─✦────✦╯\n"
+                    f"╞╡ Code ➜ `{card_code}`\n"
+                    f"│╰✦───✦──────✦─⟢\n"
+                    f"╰────═⌁TALASHNY⌁═──⟤"
+                )
+            else:
+                msg = (
+                    f"╭────═⌁TALASHNY⌁═──⟤\n"
+                    f"│╭✦───✦──────✦─⟢\n"
+                    f"╞╡ Code ➜ `{card_code}`\n"
+                    f"│╰✦───✦──────✦─⟢\n"
+                    f"╰────═⌁TALASHNY⌁═──⟤"
+                )
 
             try:
-                sent = await client.send_message(dest_channel, msg)
+                sent = await client.send_message(dest_channel, msg, parse_mode="markdown")
                 logging.info(f"✅ ارسل: {msg}")
 
                 async def delete_after(sent_msg, delay=300):
